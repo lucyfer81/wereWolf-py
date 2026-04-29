@@ -50,13 +50,20 @@ def _get_gm_model() -> OpenAIChatModel:
     return OpenAIChatModel(name, provider=provider)
 
 
+def _siliconflow_settings(temperature: float) -> ModelSettings:
+    return ModelSettings(
+        temperature=temperature,
+        extra_body={"enable_thinking": False},
+    )
+
+
 def create_player_agent() -> Agent:
     model = _get_model()
     return Agent(
         model=model,
         output_type=PlayerResponse,
         retries=3,
-        model_settings=ModelSettings(temperature=0.7),
+        model_settings=_siliconflow_settings(0.7),
     )
 
 
@@ -66,7 +73,7 @@ def create_gm_agent() -> Agent:
         model=model,
         output_type=GMSummary,
         retries=3,
-        model_settings=ModelSettings(temperature=0.2),
+        model_settings=_siliconflow_settings(0.2),
     )
 
 
@@ -76,5 +83,5 @@ def create_reflection_agent() -> Agent:
         model=model,
         output_type=Reflection,
         retries=2,
-        model_settings=ModelSettings(temperature=0.5),
+        model_settings=_siliconflow_settings(0.5),
     )
