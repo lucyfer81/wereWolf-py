@@ -25,9 +25,13 @@ async def test_new_game(client):
     resp = await client.post("/api/game/new")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["game_id"]
-    assert len(data["alive_players"]) == 8
-    assert data["phase"] == "night"
+    assert "state" in data
+    state = data["state"]
+    assert state["id"]
+    assert len(state["alivePlayers"]) == 8
+    assert state["currentDay"] == 1
+    assert state["finished"] is False
+    assert state["winner"] == "none"
 
 
 @pytest.mark.asyncio
