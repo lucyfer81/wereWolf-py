@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Werewolf Worker Arena</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main class="app-shell">
+      <header class="hero">
+        <p class="hero-tag">Worker + Static Assets</p>
+        <h1>Werewolf AI Arena</h1>
+        <p class="hero-subtitle">
+          Cloudflare Worker 驱动的 AI 狼人杀模拟器（OpenAI SDK JS + SiliconFlow）
+        </p>
+      </header>
+
+      <section class="controls panel">
+        <button id="new-game-btn" class="btn btn-primary">新建对局</button>
+        <button id="step-btn" class="btn">单步推进</button>
+        <button id="run-btn" class="btn btn-accent">自动跑到结束</button>
+        <label class="steps">
+          最大步数
+          <input id="max-steps-input" type="number" min="1" max="128" value="120" />
+        </label>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>局面状态</h2>
+          <dl id="status-list" class="status-list"></dl>
+        </article>
+        <article class="panel">
+          <h2>存活玩家</h2>
+          <div id="alive-list" class="chip-list"></div>
+        </article>
+        <article class="panel">
+          <h2>身份分配（观战）</h2>
+          <div id="roles-list" class="chip-list"></div>
+        </article>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-head">
+          <h2>时间线日志</h2>
+          <button id="export-log-btn" class="btn btn-subtle" type="button" disabled>导出 Markdown</button>
+        </div>
+        <pre id="timeline" class="timeline empty">点击“新建对局”开始。</pre>
+      </section>
+
+      <section class="panel">
+        <h2>公共事件</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Phase</th>
+                <th>Type</th>
+                <th>Speaker</th>
+                <th>Content</th>
+              </tr>
+            </thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
