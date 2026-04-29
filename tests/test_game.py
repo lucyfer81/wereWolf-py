@@ -1,0 +1,94 @@
+import pytest
+
+from src.game import (
+    WerewolfGame,
+    validate_speech,
+    validate_vote,
+    build_fallback_speech,
+    build_fallback_vote,
+)
+
+
+@pytest.fixture
+def game() -> WerewolfGame:
+    return WerewolfGame()
+
+
+def test_create_game(game):
+    state = game.state
+    assert state.current_day == 1
+    assert state.phase == "night"
+    assert len(state.alive_players) == 8
+
+
+def test_game_has_two_wolves(game):
+    wolves = [p for p in game.state.roles if game.state.roles[p] == "werewolf"]
+    assert len(wolves) == 2
+
+
+def test_validate_speech_ok():
+    assert validate_speech("Seat1", "我觉得Seat3很可疑", "Seat3", ["Seat1", "Seat3"], 2) is None
+
+
+def test_validate_speech_empty():
+    assert validate_speech("Seat1", "", "Seat3", ["Seat1", "Seat3"], 2) is not None
+
+
+def test_validate_speech_self_accusation():
+    result = validate_speech("Seat1", "我怀疑自己是狼", "Seat1", ["Seat1", "Seat3"], 2)
+    assert result is not None
+
+
+def test_validate_speech_day1_no_target_required():
+    assert validate_speech("Seat1", "观望", "", ["Seat1", "Seat3"], 1) is None
+
+
+def test_validate_speech_day2_self_target():
+    result = validate_speech("Seat1", "我觉得Seat3可疑", "Seat1", ["Seat1", "Seat3"], 2)
+    assert result is not None
+
+
+def test_validate_vote_ok():
+    assert (
+        validate_vote("Seat1", "Seat3", "Seat5", alive=["Seat1", "Seat3", "Seat5", "Seat7"])
+        is None
+    )
+
+
+def test_validate_vote_same_target():
+    result = validate_vote("Seat1", "Seat3", "Seat3", alive=["Seat1", "Seat3", "Seat5"])
+    assert result is not None
+
+
+def test_validate_vote_dead_target():
+    result = validate_vote("Seat1", "Seat9", "Seat3", alive=["Seat1", "Seat3"])
+    assert result is not None
+
+
+def test_validate_vote_self_alt():
+    result = validate_vote("Seat1", "Seat3", "Seat1", alive=["Seat1", "Seat3"])
+    assert result is not None
+
+
+def test_fallback_speech():
+    result = build_fallback_speech("Seat1", ["Seat1", "Seat3", "Seat5"], 2)
+    assert result["content"]
+    assert result["target"]
+
+
+def test_fallback_speech_day1():
+    result = build_fallback_speech("Seat1", ["Seat1", "Seat3", "Seat5"], 1)
+    assert "观望" in result["content"] or "信息有限" in result["content"]
+
+
+def test_fallback_vote():
+    result = build_fallback_vote("Seat1", ["Seat1", "Seat3", "Seat5"])
+    assert result["target"] == "Seat1"  # fallback votes for self
+    assert result["confidence"] == "low"
+
+
+def test_game_state_serializable(game):
+    state = game.state
+    assert state.game_id
+    assert isinstance(state.roles, dict)
+    assert isinstance(state.alive_players, list)
