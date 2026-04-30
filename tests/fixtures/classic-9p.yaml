@@ -1,0 +1,302 @@
+meta:
+  name: "经典9人局"
+  description: "3狼人 + 预言家 + 女巫 + 猎人 + 3村民"
+
+game:
+  total_players: 9
+
+roles:
+  werewolf:
+    team: "werewolves"
+    count: 3
+    night_action: true
+    shared_memory: true
+    night_priority: 1
+    role_info_template: |
+      你是狼人。你的同伴是：{{ teammates | join('、') }}
+    night_action_template: |
+      夜晚时，与同伴商议并选择一个村民进行击杀。
+    night_task_hint: "小提示：过于完美的推理可能引起注意，偶尔保持模糊更安全。"
+
+  seer:
+    team: "villagers"
+    count: 1
+    night_action: true
+    shared_memory: false
+    night_priority: 2
+    role_info_template: "你是预言家。你每晚可以查验一名玩家的身份（好人/狼人）。"
+    night_action_template: "夜晚时，请选择一名存活玩家进行查验，你将得知其身份。"
+    night_task_hint: ""
+
+  witch:
+    team: "villagers"
+    count: 1
+    night_action: true
+    shared_memory: false
+    night_priority: 3
+    role_info_template: "你是女巫。你有一瓶解药（救人）和一瓶毒药（毒人），各只能用一次。"
+    night_action_template: "夜晚时，你会得知今晚被杀的玩家。你可以选择使用解药救他，或使用毒药毒另一名玩家。"
+    night_task_hint: ""
+
+  hunter:
+    team: "villagers"
+    count: 1
+    night_action: false
+    shared_memory: false
+    night_priority: 99
+    role_info_template: "你是猎人。当你被投票出局或被狼人杀死时，你可以开枪带走一名玩家。"
+    night_action_template: ""
+    night_task_hint: ""
+    on_death_template: "你被淘汰了！作为猎人，你可以选择带走一名玩家。请选择目标。"
+
+  villager:
+    team: "villagers"
+    count: 3
+    night_action: false
+    shared_memory: false
+    night_priority: 99
+    role_info_template: "你是村民。你不知道其他任何人的身份。"
+    night_action_template: "夜晚时，村民没有行动，请等待天亮。"
+
+voting_styles:
+  conservative:
+    name: "保守谨慎型"
+    rules: "无确凿证据时弃票（投给自己），不急于站队"
+    scenarios:
+      - "场景1：Day 1 没有人提出实质性指控时，选择观望"
+      - "场景2：看到多人互相指控但逻辑都薄弱时，不急于站队"
+  pressure:
+    name: "施压型"
+    rules: "Day 1 倾向投票给理由最弱的发言者"
+    scenarios:
+      - "场景1：某人的发言仅为「我觉得 XXX 可疑」而无具体行为时，优先投他"
+      - "场景2：多人保持观望时，主动制造压力迫使表态"
+  contrarian:
+    name: "反共识型"
+    rules: "当多人迅速聚焦同一目标时，优先评估「最早提出主叙事的人」而非直接投给被聚焦者"
+    scenarios:
+      - "场景1：看到 3 人同投 Seat1 时，检查谁最先指控 Seat1，评估其是否在带节奏"
+      - "场景2：不直接投给被聚焦者，而是投给「造势者」"
+  logic_driven:
+    name: "逻辑驱动型"
+    rules: "优先抓自相矛盾或论据跳跃的发言"
+    scenarios:
+      - "场景1：发现某人前后发言矛盾（例如先说观察 XXX 后又投 XXX），标记为可疑"
+      - "场景2：某人论据从行为 A 跳到行为 B 而无逻辑链条，重点怀疑"
+
+style_assignment:
+  - seat: 1
+    style: conservative
+  - seat: 2
+    style: logic_driven
+  - seat: 3
+    style: contrarian
+  - seat: 4
+    style: pressure
+  - seat: 5
+    style: conservative
+  - seat: 6
+    style: logic_driven
+  - seat: 7
+    style: contrarian
+  - seat: 8
+    style: pressure
+  - seat: 9
+    style: logic_driven
+
+prompts:
+  system_header: |
+    # 狼人杀游戏：你是一名玩家
+
+    ## 当前处境
+
+    你现在身处一个有{{ total_players }}名玩家的村庄，其中有{{ wolf_count }}名隐藏的狼人。
+    - 你的座位号：**{{ player_name }}**（你就是这个玩家）
+    - 你的身份：**{{ role }}**
+    - 你知道的信息：{{ role_info }}
+    - 其他玩家：{{ player_range }}
+
+  voting_style: |
+    ## 你的投票风格
+
+    你是 {{ style_name }} 型玩家。
+
+    规则：{{ style_rules }}
+
+    场景示例：
+    {{ style_scenarios }}
+
+  unknown_info: |
+    ## 你不知道的信息
+
+    除了身份卡透露的信息外，你不知道任何人的真实身份。
+    你只能通过他们的发言、投票、行为来判断谁是敌人。
+    你必须承认自己不知道，不能假装确定或编造不存在的信息。
+    你必须始终把"我"理解为 {{ player_name }} 本人。
+    白天发言时禁止怀疑或指控自己；投票时允许因观望投给自己，但这不等同于自我指控。
+
+  night_action_section: |
+    ## 夜晚发生什么
+
+    {{ night_action }}
+
+  output_format: |
+    ## 输出格式
+
+    请以 JSON 格式回复：
+    {%- raw %}
+    {
+    {%- endraw %}
+      "action": "{{ allowed_actions | join(' | ') }}",
+      "target": "{{ player_names | join(' | ') }}",
+      "content": "你的发言内容或决策理由（<=120字）",
+      "confidence": "high | medium | low",
+      "risk_if_wrong": "如果投错会导致什么后果（投票时必须填写）",
+      "alt_target": "备选目标（必须是不同于 target 的存活玩家）",
+      "target_vs_alt_reason": "为什么 target 比 alt_target 更可疑（>=8字）",
+      "evidence": ["证据1（含《可核查引用》）", "证据2（含《可核查引用》）"],
+      "changed_vote": false,
+      "why_change": ""
+    }
+
+  gm_system: |
+    # 狼人杀游戏管理员 (GameMaster)
+
+    你是狼人杀游戏的 Game Master（游戏管理员），负责推进游戏流程和裁决胜负。
+    你只需要输出 JSON，不要输出额外文本。
+
+  night_task: |
+    现在是第 {{ day }} 天夜晚。
+
+    {{ role_specific_night_instruction }}
+    当前存活玩家：{{ alive_players | join('、') }}
+    请选择今晚的{{ night_verb }}。
+    {{ night_task_hint }}
+    {% if observation %}
+    你之前关注的观察对象：{{ observation }}
+    {% endif %}
+
+  seer_night_task: |
+    现在是第 {{ day }} 天夜晚。
+    你是预言家。当前存活玩家：{{ alive_players | join('、') }}
+    请选择一名玩家进行查验，你将得知其身份（好人/狼人）。
+
+  witch_night_task: |
+    现在是第 {{ day }} 天夜晚。
+    今晚被杀的玩家是：{{ killed_player }}
+    {% if not antidote_used %}
+    你还有解药，可以选择救他。
+    {% endif %}
+    {% if not poison_used %}
+    你还有毒药，可以选择毒另一名玩家。
+    {% endif %}
+    当前存活玩家：{{ alive_players | join('、') }}
+    请决定是否用药。如果不用药，target 填自己。
+
+  speech_task: |
+    现在是第 {{ day }} 天白天。
+    你当前座位：{{ player }}（你就是"我"）
+    你的身份：{{ role }}
+    当前存活玩家：{{ alive | join('、') }}
+    {% if prior_speeches %}
+
+    之前的发言记录：
+    {{ prior_speeches_json }}
+    {% endif %}
+    {% if observation %}
+
+    你观察的重点是：{{ observation }}
+    {% endif %}
+
+    可核查公共事实（evidence 必须引用其中原文片段）：
+    {{ evidence_facts }}
+
+    {% if day == 1 %}
+    请进行你的发言（<=120字）。你可以点名怀疑对象并给理由，或说明暂时观望。
+    如果你点名怀疑对象，target 不能是你自己（{{ player }}）。
+    {% else %}
+    请进行你的发言（<=120字），必须包含怀疑对象和理由。
+    必须在 target 字段填写你怀疑的存活玩家，且 target 不能是你自己（{{ player }}）。
+    {% endif %}
+    禁止出现"我怀疑自己 / 我觉得自己像狼 / 我投自己因为我是狼"这类自我指控。
+    你必须填写 evidence 数组，至少1条；每条都要包含《引用片段》且可在公共事实中找到。
+    {% if role == "werewolf" %}
+    小提示：过于完美的推理可能引起注意，偶尔保持模糊更安全。
+    {% endif %}
+
+  first_vote_task: |
+    现在是第 {{ day }} 天白天【第一轮：初投】。
+    你的身份：{{ role }}
+    当前存活玩家：{{ alive | join('、') }}
+
+    GM公共公告摘要：
+    {{ day_summary }}
+
+    可核查公共事实（evidence 必须引用其中原文片段）：
+    {{ evidence_facts }}
+
+    你今天的发言："{{ own_speech }}"
+
+    投票约束：
+    - 这是第一轮私下投票，结果不会立即公开
+    - 你必须在 risk_if_wrong 字段填写投错代价（>=6字）
+    - 你必须填写 evidence 数组，至少2条；每条都要包含《引用片段》且可在公共事实中找到
+    - 你必须填写 alt_target，且 alt_target 必须是不同于 target 的存活玩家
+    - 你必须填写 target_vs_alt_reason（>=8字），说明为何 target 比 alt_target 更可疑
+    - 不要盲目跟风，基于摘要和你自己的发言决策
+
+    请投票给你认为最可能是狼人的玩家，或投给自己表示观望。
+    {% if recent_death %}
+    最近一次死亡：{{ recent_death }}
+    {% endif %}
+    {% if observation %}
+    记住你要观察的对象：{{ observation }}
+    {% endif %}
+
+  second_vote_task: |
+    现在是第 {{ day }} 天白天【第二轮：终投】。
+    你的身份：{{ role }}
+    当前存活玩家：{{ alive | join('、') }}
+
+    GM公共公告摘要：
+    {{ day_summary }}
+
+    {{ vote_distribution }}
+
+    可核查公共事实（evidence 必须引用其中原文片段）：
+    {{ evidence_facts }}
+
+    当前最高票目标：{{ consensus_targets | join('、') or '（无）' }}
+    你第一轮投给了：{{ first_vote_target }}
+    你今天的发言："{{ own_speech }}"
+
+    投票约束：
+    - 你可以看到第一轮票型分布，据此调整决策
+    - 你必须填写 evidence 数组，至少2条；每条都要包含《引用片段》且可在公共事实中找到
+    - 你必须填写 alt_target，且 alt_target 必须是不同于 target 的存活玩家
+    - 你必须填写 target_vs_alt_reason（>=8字），说明为何 target 比 alt_target 更可疑
+    - 若 target 命中当前最高票目标，必须额外给出至少一条指向该目标的独立证据（不能只说"大家都投"）
+    - 改票时 changed_vote 必须为 true
+    - 改票时 why_change 必须>=5字，否则改票无效
+    - 不改票时 changed_vote=false，why_change 为空
+
+    请进行你的终投。
+    {% if recent_death %}
+    最近一次死亡：{{ recent_death }}
+    {% endif %}
+    {% if observation %}
+    记住你要观察的对象：{{ observation }}
+    {% endif %}
+
+  summary_task: |
+    请为第 {{ day }} 天的发言生成投票摘要。
+    以下是今天所有存活玩家的发言：
+    {{ speeches_json }}
+    你必须只输出 JSON：{"summary":"..."}。
+    summary 必须仅包含事实，不表达立场，且最多 6 行。
+    每行尽量覆盖：点名怀疑对象、支持/反对对象、是否给出理由、是否质疑带节奏。
+
+settings:
+  llm_timeout: 60
+  max_speech_length: 120
+  evidence_min_count: 2

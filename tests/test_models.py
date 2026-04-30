@@ -8,6 +8,8 @@ from src.models import (
     GameMemory,
     SpeechRecord,
     VoteRecord,
+    WitchState,
+    SeerResult,
     create_new_game_state,
 )
 
@@ -125,3 +127,47 @@ def test_sort_alive(config):
 def test_game_has_game_id(config):
     state = create_new_game_state(config)
     assert len(state.game_id) == 8
+
+
+def test_create_9p_game():
+    config = load_config(FIXTURE_DIR / "classic-9p.yaml")
+    state = create_new_game_state(config)
+    assert len(state.alive_players) == 9
+    role_counts: dict[str, int] = {}
+    for p in state.alive_players:
+        r = state.roles[p]
+        role_counts[r] = role_counts.get(r, 0) + 1
+    assert role_counts["werewolf"] == 3
+    assert role_counts["seer"] == 1
+    assert role_counts["witch"] == 1
+    assert role_counts["hunter"] == 1
+    assert role_counts["villager"] == 3
+
+
+def test_witch_state():
+    ws = WitchState()
+    assert ws.antidote_used is False
+    assert ws.poison_used is False
+    ws.antidote_used = True
+    assert ws.antidote_used is True
+
+
+def test_seer_result():
+    sr = SeerResult(day=1, target="Seat3", result="werewolf")
+    assert sr.day == 1
+    assert sr.target == "Seat3"
+    assert sr.result == "werewolf"
+
+
+def test_player_memory_seer_results():
+    mem = PlayerMemory()
+    mem.seer_results.append(SeerResult(day=1, target="Seat3", result="werewolf"))
+    assert len(mem.seer_results) == 1
+    assert mem.seer_results[0].result == "werewolf"
+
+
+def test_player_memory_role_state():
+    mem = PlayerMemory()
+    mem.role_state = {"antidote_used": False, "poison_used": False}
+    assert mem.role_state is not None
+    assert mem.role_state["antidote_used"] is False

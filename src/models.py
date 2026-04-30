@@ -36,6 +36,19 @@ class VoteRecord:
 
 
 @dataclass
+class WitchState:
+    antidote_used: bool = False
+    poison_used: bool = False
+
+
+@dataclass
+class SeerResult:
+    day: int
+    target: str
+    result: str  # "good" | "werewolf"
+
+
+@dataclass
 class PublicEvent:
     day: int
     phase: Phase
@@ -54,6 +67,8 @@ class PlayerMemory:
     death_log: dict[int, str] = field(default_factory=dict)  # day -> 死亡玩家
     reflections: list[str] = field(default_factory=list)  # 按追加顺序，全量保留
     suspicion: dict[str, float] = field(default_factory=dict)  # player -> 怀疑分
+    seer_results: list[SeerResult] = field(default_factory=list)
+    role_state: dict | None = None  # per-role state like WitchState
 
     def get_day_context(self, up_to_day: int) -> str:
         parts: list[str] = []

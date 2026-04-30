@@ -70,6 +70,36 @@ def build_night_task(
     )
 
 
+def build_seer_night_task(
+    config: GameConfig,
+    day: int,
+    alive_players: list[str],
+) -> str:
+    return render_template(
+        config.prompts.get("seer_night_task", ""),
+        day=day,
+        alive_players=alive_players,
+    )
+
+
+def build_witch_night_task(
+    config: GameConfig,
+    day: int,
+    killed_player: str,
+    alive_players: list[str],
+    antidote_used: bool,
+    poison_used: bool,
+) -> str:
+    return render_template(
+        config.prompts.get("witch_night_task", ""),
+        day=day,
+        killed_player=killed_player,
+        alive_players=alive_players,
+        antidote_used=antidote_used,
+        poison_used=poison_used,
+    )
+
+
 def build_speech_task(
     config: GameConfig,
     player: str,

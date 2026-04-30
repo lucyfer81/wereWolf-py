@@ -128,6 +128,70 @@ async def test_night_then_day_phase_transition():
 
 
 @pytest.mark.asyncio
+async def test_full_9p_game_with_mock():
+    config = load_config(FIXTURE_DIR / "classic-9p.yaml")
+    game = WerewolfGame(config)
+
+    async def mock_run(prompt, **kwargs):
+        prompt_str = str(prompt)
+
+        if "夜晚" in prompt_str or "查验" in prompt_str or "毒药" in prompt_str or "解药" in prompt_str or "被杀" in prompt_str:
+            # For any night action, target a non-wolf player
+            non_wolves = [
+                p for p in game.state.alive_players
+                if game.state.role_teams.get(game.state.roles[p]) != "werewolves"
+            ]
+            target = non_wolves[0] if non_wolves else "Seat1"
+            return _MockResult(_resp(target, f"行动{target}", action="night_action"))
+
+        if "终投" in prompt_str or "初投" in prompt_str:
+            alive = game.state.sort_alive()
+            wolves_alive = [
+                p for p in alive if game.state.role_teams.get(game.state.roles[p]) == "werewolves"
+            ]
+            target = wolves_alive[0] if wolves_alive else alive[0]
+            others = [p for p in alive if p != target]
+            alt = others[0] if others else alive[0]
+            return _MockResult(
+                _resp(target, f"投{target}", action="vote", alt_target=alt)
+            )
+
+        if "发言" in prompt_str or "白天" in prompt_str:
+            alive = game.state.sort_alive()
+            others = [p for p in alive if p != "Seat1"]
+            target = others[0] if others else alive[0]
+            return _MockResult(
+                _resp(target, f"我怀疑{target}", action="speech")
+            )
+
+        if "淘汰" in prompt_str or "开枪" in prompt_str:
+            # Hunter shot - target a wolf
+            alive = game.state.sort_alive()
+            wolves_alive = [
+                p for p in alive if game.state.role_teams.get(game.state.roles[p]) == "werewolves"
+            ]
+            target = wolves_alive[0] if wolves_alive else (alive[0] if alive else "Seat1")
+            return _MockResult(_resp(target, f"开枪{target}", action="night_action"))
+
+        return _MockResult(GMSummary(summary="讨论摘要"))
+
+    mock_agent = AsyncMock()
+    mock_agent.run = mock_run
+
+    with (
+        patch("src.game.create_player_agent", return_value=mock_agent),
+        patch("src.game.create_gm_agent", return_value=mock_agent),
+    ):
+        steps = 0
+        while game.state.winner == "none" and steps < 200:
+            await game.run_one_step()
+            steps += 1
+
+    assert game.state.winner in ("werewolves", "villagers")
+    assert steps < 200
+
+
+@pytest.mark.asyncio
 async def test_memory_tracks_events():
     config = load_config(FIXTURE_DIR / "default-8p.yaml")
     game = WerewolfGame(config)

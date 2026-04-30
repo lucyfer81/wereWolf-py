@@ -9,8 +9,10 @@ from src.models import (
     GameState,
     Phase,
     PublicEvent,
+    SeerResult,
     SpeechRecord,
     VoteRecord,
+    WitchState,
     create_new_game_state,
 )
 from src.llm import PlayerResponse, create_gm_agent, create_player_agent
@@ -20,8 +22,10 @@ from src.prompts import (
     build_night_task,
     build_player_system_prompt,
     build_second_vote_task,
+    build_seer_night_task,
     build_speech_task,
     build_summary_task,
+    build_witch_night_task,
 )
 from src.styles import get_style_for_player, get_style_card
 
@@ -145,54 +149,139 @@ class WerewolfGame:
     async def _run_night_phase(self):
         state = self.state
         config = self.config
-        wolves = [
-            p for p in state.alive_players
-            if state.role_teams.get(state.roles[p]) == "werewolves"
-        ]
 
-        if not wolves:
-            state.winner = state.check_win()
-            state.phase = "day"
-            return
+        night_roles = sorted(
+            [(k, v) for k, v in config.roles.items() if v.night_action],
+            key=lambda x: x[1].night_priority,
+        )
 
-        targets: dict[str, int] = {}
+        night_killed: str | None = None
+        witch_save: str | None = None
+        witch_poison: str | None = None
 
-        for wolf in wolves:
-            teammates = [w for w in wolves if w != wolf]
-            observation = ""
-            task = build_night_task(config, state.current_day, teammates, state.alive_players, observation)
-            sys_prompt = _get_player_sys_prompt(state, wolf, config)
-            agent = create_player_agent(sys_prompt)
+        for role_key, role_cfg in night_roles:
+            players_with_role = [
+                p for p in state.alive_players if state.roles[p] == role_key
+            ]
+            if not players_with_role:
+                continue
 
-            resp = await self._call_agent(agent, task)
-            if resp and resp.target in state.alive_players and state.role_teams.get(state.roles.get(resp.target)) != "werewolves":
-                targets[resp.target] = targets.get(resp.target, 0) + 1
-            else:
-                villagers = [p for p in state.alive_players if state.role_teams.get(state.roles[p]) != "werewolves"]
-                if villagers:
-                    t = random.choice(villagers)
-                    targets[t] = targets.get(t, 0) + 1
+            if role_key == "werewolf":
+                # Collect votes from all wolves
+                targets: dict[str, int] = {}
+                for wolf in players_with_role:
+                    teammates = [w for w in players_with_role if w != wolf]
+                    task = build_night_task(
+                        config, state.current_day, teammates,
+                        state.alive_players,
+                    )
+                    sys_prompt = _get_player_sys_prompt(state, wolf, config)
+                    agent = create_player_agent(sys_prompt)
+                    resp = await self._call_agent(agent, task)
+                    if (
+                        resp
+                        and resp.target in state.alive_players
+                        and state.role_teams.get(state.roles.get(resp.target)) != "werewolves"
+                    ):
+                        targets[resp.target] = targets.get(resp.target, 0) + 1
+                    else:
+                        non_wolves = [
+                            p for p in state.alive_players
+                            if state.role_teams.get(state.roles[p]) != "werewolves"
+                        ]
+                        if non_wolves:
+                            t = random.choice(non_wolves)
+                            targets[t] = targets.get(t, 0) + 1
 
-        if targets:
-            max_votes = max(targets.values())
-            top_targets = [t for t, c in targets.items() if c == max_votes]
-            kill_target = sort_seats(top_targets)[0]
+                if targets:
+                    max_votes = max(targets.values())
+                    top_targets = [t for t, c in targets.items() if c == max_votes]
+                    night_killed = sort_seats(top_targets)[0]
 
-            state.alive_players.remove(kill_target)
-            state.memory.werewolf_memory.kills[state.current_day] = kill_target
+            elif role_key == "seer":
+                for player in players_with_role:
+                    task = build_seer_night_task(
+                        config, state.current_day, state.alive_players,
+                    )
+                    sys_prompt = _get_player_sys_prompt(state, player, config)
+                    agent = create_player_agent(sys_prompt)
+                    resp = await self._call_agent(agent, task)
+                    if resp and resp.target in state.alive_players:
+                        target_role = state.roles[resp.target]
+                        team = state.role_teams.get(target_role, "villagers")
+                        result = "werewolf" if team == "werewolves" else "good"
+                        state.memory.player_memories[player].seer_results.append(
+                            SeerResult(
+                                day=state.current_day,
+                                target=resp.target,
+                                result=result,
+                            )
+                        )
 
+            elif role_key == "witch":
+                for player in players_with_role:
+                    if not night_killed:
+                        continue
+                    pm = state.memory.player_memories[player]
+                    if pm.role_state is None:
+                        pm.role_state = {
+                            "antidote_used": False,
+                            "poison_used": False,
+                        }
+                    ws = pm.role_state
+                    task = build_witch_night_task(
+                        config, state.current_day, night_killed,
+                        state.alive_players,
+                        ws["antidote_used"], ws["poison_used"],
+                    )
+                    sys_prompt = _get_player_sys_prompt(state, player, config)
+                    agent = create_player_agent(sys_prompt)
+                    resp = await self._call_agent(agent, task)
+                    if resp:
+                        if (
+                            resp.target == night_killed
+                            and not ws["antidote_used"]
+                        ):
+                            witch_save = night_killed
+                            ws["antidote_used"] = True
+                        elif (
+                            resp.target != night_killed
+                            and resp.target in state.alive_players
+                            and not ws["poison_used"]
+                        ):
+                            witch_poison = resp.target
+                            ws["poison_used"] = True
+
+        # Resolve deaths
+        deaths: list[str] = []
+        if night_killed and night_killed != witch_save:
+            deaths.append(night_killed)
+        if witch_poison and witch_poison not in deaths:
+            deaths.append(witch_poison)
+
+        for dead in deaths:
+            state.alive_players.remove(dead)
+            for pm in state.memory.player_memories.values():
+                pm.death_log[state.current_day] = dead
             state.timeline.append(
                 PublicEvent(
                     day=state.current_day,
                     phase="night",
                     type="death",
                     speaker="GameMaster",
-                    content=f"{kill_target} 被狼人杀害",
+                    content=f"{dead} 被杀害",
                     alive_players=list(state.alive_players),
                 )
             )
-            for pm in state.memory.player_memories.values():
-                pm.death_log[state.current_day] = kill_target
+
+        # Trigger hunter on-death
+        for dead in deaths:
+            if state.roles[dead] == "hunter":
+                await self._run_hunter_shot(dead)
+
+        # Store werewolf kill
+        if night_killed:
+            state.memory.werewolf_memory.kills[state.current_day] = night_killed
 
         winner = state.check_win()
         if winner != "none":
@@ -200,6 +289,46 @@ class WerewolfGame:
         else:
             state.phase = "day"
             state.day_progress = DayProgress(stage="speeches")
+
+    async def _run_hunter_shot(self, hunter: str):
+        """Hunter shoots someone when dying."""
+        state = self.state
+        config = self.config
+        role_cfg = config.roles.get("hunter")
+        if not role_cfg or not role_cfg.on_death_template:
+            return
+
+        alive = [p for p in state.alive_players if p != hunter]
+        if not alive:
+            return
+
+        sys_prompt = _get_player_sys_prompt(state, hunter, config)
+        agent = create_player_agent(sys_prompt)
+
+        task = render_template(role_cfg.on_death_template)
+        task += f"\n当前存活玩家：{', '.join(alive)}"
+
+        resp = await self._call_agent(agent, task)
+        shot_target = None
+        if resp and resp.target in alive:
+            shot_target = resp.target
+        else:
+            shot_target = random.choice(alive)
+
+        if shot_target in state.alive_players:
+            state.alive_players.remove(shot_target)
+            for pm in state.memory.player_memories.values():
+                pm.death_log[state.current_day] = shot_target
+            state.timeline.append(
+                PublicEvent(
+                    day=state.current_day,
+                    phase="night",
+                    type="death",
+                    speaker="GameMaster",
+                    content=f"{hunter}（猎人）开枪带走了 {shot_target}",
+                    alive_players=list(state.alive_players),
+                )
+            )
 
     async def _run_day_phase(self):
         state = self.state

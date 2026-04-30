@@ -89,3 +89,16 @@ class TestValidateConfig:
         config.roles = {k: v for k, v in config.roles.items() if v.team != "werewolves"}
         errors = validate_config(config)
         assert any("狼人" in e for e in errors)
+
+
+def test_load_9p_config():
+    config = load_config(FIXTURE_DIR / "classic-9p.yaml")
+    assert config.total_players == 9
+    assert "seer" in config.roles
+    assert "witch" in config.roles
+    assert "hunter" in config.roles
+    assert config.roles["werewolf"].count == 3
+    assert config.roles["seer"].night_action is True
+    assert config.roles["hunter"].on_death_template is not None
+    errors = validate_config(config)
+    assert errors == []
