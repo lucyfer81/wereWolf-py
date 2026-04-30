@@ -1,5 +1,7 @@
 import pytest
+from pathlib import Path
 
+from src.config_loader import load_config, GameConfig
 from src.game import (
     WerewolfGame,
     validate_speech,
@@ -8,10 +10,17 @@ from src.game import (
     build_fallback_vote,
 )
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
 
 @pytest.fixture
-def game() -> WerewolfGame:
-    return WerewolfGame()
+def config() -> GameConfig:
+    return load_config(FIXTURE_DIR / "default-8p.yaml")
+
+
+@pytest.fixture
+def game(config) -> WerewolfGame:
+    return WerewolfGame(config)
 
 
 def test_create_game(game):
@@ -22,7 +31,10 @@ def test_create_game(game):
 
 
 def test_game_has_two_wolves(game):
-    wolves = [p for p in game.state.roles if game.state.roles[p] == "werewolf"]
+    wolves = [
+        p for p in game.state.roles
+        if game.state.role_teams.get(game.state.roles[p]) == "werewolves"
+    ]
     assert len(wolves) == 2
 
 

@@ -11,9 +11,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from pathlib import Path
+
+from src.config_loader import load_config
 from src.game import WerewolfGame
 
 load_dotenv()
+
+DEFAULT_CONFIG = Path(__file__).parent.parent / "configs" / "default-8p.yaml"
 
 _current_game: WerewolfGame | None = None
 
@@ -47,9 +52,11 @@ async def health():
 
 
 @app.post("/api/game/new")
-async def new_game():
+async def new_game(config_path: str | None = None):
     global _current_game
-    _current_game = WerewolfGame()
+    path = Path(config_path) if config_path else DEFAULT_CONFIG
+    config = load_config(path)
+    _current_game = WerewolfGame(config)
     return {"state": _serialize_state(_current_game.state)}
 
 

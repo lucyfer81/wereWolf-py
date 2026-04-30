@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 
+from src.config_loader import GameConfig, render_template
 from src.models import (
     DayProgress,
     GameState,
@@ -15,15 +16,14 @@ from src.models import (
 from src.llm import PlayerResponse, create_gm_agent, create_player_agent
 from src.prompts import (
     build_first_vote_task,
+    build_gm_system_prompt,
     build_night_task,
     build_player_system_prompt,
     build_second_vote_task,
     build_speech_task,
     build_summary_task,
 )
-from src.styles import VOTING_STYLE_CARDS, get_style_for_player
-
-LLM_TIMEOUT = 60
+from src.styles import get_style_for_player, get_style_card
 
 
 def sort_seats(seats: list[str]) -> list[str]:
@@ -91,22 +91,23 @@ def build_fallback_vote(player: str, alive: list[str]) -> dict:
     }
 
 
-def _get_player_sys_prompt(state: GameState, player: str) -> str:
-    style_key = get_style_for_player(player)
-    style_card = VOTING_STYLE_CARDS[style_key]
+def _get_player_sys_prompt(state: GameState, player: str, config: GameConfig) -> str:
+    style_key = get_style_for_player(player, config)
+    style_card = get_style_card(style_key, config)
     role = state.roles[player]
-    wolves = [p for p in state.alive_players if state.roles[p] == "werewolf"]
+    role_cfg = config.roles[role]
 
-    if role == "werewolf":
-        teammates = [w for w in wolves if w != player]
-        role_info = f"你是狼人。你的同伴是：{', '.join(sorted(teammates)) or '（无）'}"
-        night_action = "夜晚时，与同伴商议并选择一个村民进行击杀。"
-    else:
-        role_info = "你是村民。你不知道其他任何人的身份。"
-        night_action = "夜晚时，村民没有行动，请等待天亮。"
+    teammates_in_team = [
+        p for p in state.alive_players
+        if state.roles[p] == role and p != player
+    ]
+    role_info = render_template(
+        role_cfg.role_info_template, teammates=sorted(teammates_in_team)
+    )
+    night_action = render_template(role_cfg.night_action_template)
 
     return build_player_system_prompt(
-        player, role, role_info,
+        config, player, role, role_info,
         style_card["name"], style_card["rules"],
         "\n".join(style_card["scenarios"]),
         night_action,
@@ -114,18 +115,20 @@ def _get_player_sys_prompt(state: GameState, player: str) -> str:
 
 
 class WerewolfGame:
-    def __init__(self):
-        self.state = create_new_game_state()
+    def __init__(self, config: GameConfig):
+        self.config = config
+        self.state = create_new_game_state(config)
+        self._llm_timeout = config.settings.get("llm_timeout", 60)
 
     async def _call_agent(self, agent, task) -> PlayerResponse | None:
         try:
-            result = await asyncio.wait_for(agent.run(task), timeout=LLM_TIMEOUT)
+            result = await asyncio.wait_for(agent.run(task), timeout=self._llm_timeout)
             return result.output
         except Exception:
             pass
         try:
             bak_agent = create_player_agent(use_bak=True)
-            result = await asyncio.wait_for(bak_agent.run(task), timeout=LLM_TIMEOUT)
+            result = await asyncio.wait_for(bak_agent.run(task), timeout=self._llm_timeout)
             return result.output
         except Exception:
             return None
@@ -141,7 +144,11 @@ class WerewolfGame:
 
     async def _run_night_phase(self):
         state = self.state
-        wolves = [p for p in state.alive_players if state.roles[p] == "werewolf"]
+        config = self.config
+        wolves = [
+            p for p in state.alive_players
+            if state.role_teams.get(state.roles[p]) == "werewolves"
+        ]
 
         if not wolves:
             state.winner = state.check_win()
@@ -153,15 +160,15 @@ class WerewolfGame:
         for wolf in wolves:
             teammates = [w for w in wolves if w != wolf]
             observation = ""
-            task = build_night_task(state.current_day, teammates, state.alive_players, observation)
-            sys_prompt = _get_player_sys_prompt(state, wolf)
+            task = build_night_task(config, state.current_day, teammates, state.alive_players, observation)
+            sys_prompt = _get_player_sys_prompt(state, wolf, config)
             agent = create_player_agent(sys_prompt)
 
             resp = await self._call_agent(agent, task)
-            if resp and resp.target in state.alive_players and state.roles.get(resp.target) != "werewolf":
+            if resp and resp.target in state.alive_players and state.role_teams.get(state.roles.get(resp.target)) != "werewolves":
                 targets[resp.target] = targets.get(resp.target, 0) + 1
             else:
-                villagers = [p for p in state.alive_players if state.roles[p] == "villager"]
+                villagers = [p for p in state.alive_players if state.role_teams.get(state.roles[p]) != "werewolves"]
                 if villagers:
                     t = random.choice(villagers)
                     targets[t] = targets.get(t, 0) + 1
@@ -211,15 +218,17 @@ class WerewolfGame:
 
     async def _run_speeches(self):
         state = self.state
+        config = self.config
         progress = state.day_progress
         alive = state.sort_alive()
 
         if progress.speech_index < len(alive):
             player = alive[progress.speech_index]
-            sys_prompt = _get_player_sys_prompt(state, player)
+            sys_prompt = _get_player_sys_prompt(state, player, config)
 
             evidence_facts = self._build_evidence_facts()
             task = build_speech_task(
+                config,
                 player=player,
                 role=state.roles[player],
                 day=state.current_day,
@@ -264,16 +273,15 @@ class WerewolfGame:
 
     async def _run_summary(self):
         state = self.state
+        config = self.config
 
-        from src.prompts import build_gm_system_prompt
-
-        sys_prompt = build_gm_system_prompt()
+        sys_prompt = build_gm_system_prompt(config)
         agent = create_gm_agent(sys_prompt)
         task = build_summary_task(
-            state.current_day, state.day_progress.speeches, state.sort_alive()
+            config, state.current_day, state.day_progress.speeches, state.sort_alive()
         )
         try:
-            result = await asyncio.wait_for(agent.run(task), timeout=LLM_TIMEOUT)
+            result = await asyncio.wait_for(agent.run(task), timeout=self._llm_timeout)
             summary = result.output.summary
         except Exception:
             summary = f"第{state.current_day}天：玩家们进行了讨论。"
@@ -293,13 +301,15 @@ class WerewolfGame:
 
     async def _run_first_vote(self):
         state = self.state
+        config = self.config
         alive = state.sort_alive()
 
         for player in alive:
-            sys_prompt = _get_player_sys_prompt(state, player)
+            sys_prompt = _get_player_sys_prompt(state, player, config)
             evidence_facts = self._build_evidence_facts()
             own_speech = state.day_progress.speeches.get(player, "（无）")
             task = build_first_vote_task(
+                config,
                 player=player,
                 role=state.roles[player],
                 day=state.current_day,
@@ -349,14 +359,16 @@ class WerewolfGame:
 
     async def _run_second_vote(self):
         state = self.state
+        config = self.config
         alive = state.sort_alive()
 
         for player in alive:
-            sys_prompt = _get_player_sys_prompt(state, player)
+            sys_prompt = _get_player_sys_prompt(state, player, config)
             evidence_facts = self._build_evidence_facts()
             own_speech = state.day_progress.speeches.get(player, "（无）")
             first_target = state.day_progress.initial_votes.get(player, player)
             task = build_second_vote_task(
+                config,
                 player=player,
                 role=state.roles[player],
                 day=state.current_day,

@@ -6,26 +6,11 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-type Role = Literal["werewolf", "villager"]
+type Role = str  # 从 config 动态决定
 type Winner = Literal["werewolves", "villagers", "none"]
 type Phase = Literal["day", "night"]
-type VoteStyleKey = Literal["conservative", "pressure", "contrarian", "logic_driven"]
+type VoteStyleKey = str  # 从 config 动态决定
 type DayStage = Literal["speeches", "summary", "first_vote", "second_vote", "resolve"]
-
-TOTAL_PLAYERS = 8
-TOTAL_WEREWOLVES = 2
-PLAYER_NAMES = [f"Seat{i + 1}" for i in range(TOTAL_PLAYERS)]
-
-DEFAULT_VOTING_STYLES: dict[str, VoteStyleKey] = {
-    "Seat1": "conservative",
-    "Seat2": "logic_driven",
-    "Seat3": "contrarian",
-    "Seat4": "pressure",
-    "Seat5": "conservative",
-    "Seat6": "logic_driven",
-    "Seat7": "contrarian",
-    "Seat8": "pressure",
-}
 
 
 @dataclass
@@ -124,7 +109,7 @@ class GameMemory:
     player_memories: dict[str, PlayerMemory] = field(default_factory=dict)
     werewolf_memory: WerewolfSharedMemory = field(default_factory=WerewolfSharedMemory)
 
-    def get_prompt_context(self, player: str, role: Role, day: int) -> str:
+    def get_prompt_context(self, player: str, role: str, role_teams: dict[str, str], day: int) -> str:
         mem = self.player_memories.get(player, PlayerMemory())
         parts: list[str] = []
         public = mem.get_day_context(day)
@@ -133,7 +118,7 @@ class GameMemory:
         reflections = mem.get_reflections_str()
         if reflections:
             parts.append(reflections)
-        if role == "werewolf":
+        if role_teams.get(role) == "werewolves":
             parts.append(self.werewolf_memory.to_str(day))
         return "\n\n".join(parts)
 
@@ -153,25 +138,23 @@ class DayProgress:
 @dataclass
 class GameState:
     roles: dict[str, Role] = field(default_factory=dict)
+    role_teams: dict[str, str] = field(default_factory=dict)  # role_key -> team
     alive_players: list[str] = field(default_factory=list)
     current_day: int = 1
     phase: Phase = "night"
     winner: Winner = "none"
     timeline: list[PublicEvent] = field(default_factory=list)
     day_progress: DayProgress = field(default_factory=DayProgress)
-    voting_styles: dict[str, VoteStyleKey] = field(
-        default_factory=lambda: dict(DEFAULT_VOTING_STYLES)
-    )
+    voting_styles: dict[str, VoteStyleKey] = field(default_factory=dict)
     memory: GameMemory = field(default_factory=GameMemory)
     game_id: str = ""
 
     def check_win(self) -> Winner:
         alive_wolves = sum(
-            1 for p in self.alive_players if self.roles[p] == "werewolf"
+            1 for p in self.alive_players
+            if self.role_teams.get(self.roles[p]) == "werewolves"
         )
-        alive_villagers = sum(
-            1 for p in self.alive_players if self.roles[p] == "villager"
-        )
+        alive_villagers = len(self.alive_players) - alive_wolves
         if alive_wolves == 0:
             return "villagers"
         if alive_wolves >= alive_villagers:
@@ -182,32 +165,49 @@ class GameState:
         return sorted(self.alive_players, key=lambda s: int(s.replace("Seat", "")))
 
 
-def create_new_game_state() -> GameState:
-    players = list(PLAYER_NAMES)
-    wolves = random.sample(players, TOTAL_WEREWOLVES)
-    roles: dict[str, Role] = {
-        p: ("werewolf" if p in wolves else "villager") for p in players
-    }
+def create_new_game_state(config) -> GameState:
+    from src.config_loader import GameConfig  # avoid circular
 
-    wolf_names = [p for p in players if roles[p] == "werewolf"]
+    total = config.total_players
+    players = [f"Seat{i + 1}" for i in range(total)]
+
+    # Build role pool: list of (role_key, team) pairs
+    role_pool: list[tuple[str, str]] = []
+    for role_key, role_cfg in config.roles.items():
+        for _ in range(role_cfg.count):
+            role_pool.append((role_key, role_cfg.team))
+
+    random.shuffle(role_pool)
+
+    roles: dict[str, Role] = {}
+    role_teams: dict[str, str] = {}
+    for i, player in enumerate(players):
+        role_key, team = role_pool[i]
+        roles[player] = role_key
+        role_teams[role_key] = team
+
+    # Shared memory roles
+    shared_memory_roles = {k for k, v in config.roles.items() if v.shared_memory}
+    wolf_names = sorted([p for p in players if roles[p] in shared_memory_roles])
 
     player_memories: dict[str, PlayerMemory] = {p: PlayerMemory() for p in players}
-    werewolf_memory = WerewolfSharedMemory(teammates=sorted(wolf_names))
+    werewolf_memory = WerewolfSharedMemory(teammates=wolf_names)
 
     game_memory = GameMemory(
         player_memories=player_memories,
         werewolf_memory=werewolf_memory,
     )
 
+    style_map = {f"Seat{seat}": style for seat, style in config.style_assignment.items()}
+
     return GameState(
         roles=roles,
-        alive_players=sorted(
-            players, key=lambda s: int(s.replace("Seat", ""))
-        ),
+        role_teams=role_teams,
+        alive_players=sorted(players, key=lambda s: int(s.replace("Seat", ""))),
         current_day=1,
         phase="night",
         winner="none",
-        voting_styles=dict(DEFAULT_VOTING_STYLES),
+        voting_styles=style_map,
         memory=game_memory,
         game_id=uuid.uuid4().hex[:8],
     )

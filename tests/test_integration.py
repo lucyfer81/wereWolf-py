@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from src.config_loader import load_config
 from src.game import WerewolfGame
 from src.llm import PlayerResponse, GMSummary
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 
 def _resp(target: str, content: str, action: str = "speech", **kw) -> PlayerResponse:
@@ -31,7 +36,8 @@ class _MockResult:
 
 @pytest.mark.asyncio
 async def test_full_game_with_mock():
-    game = WerewolfGame()
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    game = WerewolfGame(config)
     call_count = 0
 
     async def mock_run(prompt, **kwargs):
@@ -41,7 +47,7 @@ async def test_full_game_with_mock():
 
         if "夜晚" in prompt_str:
             villagers = [
-                p for p in game.state.alive_players if game.state.roles[p] == "villager"
+                p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) == "villagers"
             ]
             target = villagers[0] if villagers else "Seat1"
             return _MockResult(_resp(target, f"选择击杀{target}", action="night_action"))
@@ -49,7 +55,7 @@ async def test_full_game_with_mock():
         if "终投" in prompt_str or "初投" in prompt_str:
             alive = game.state.sort_alive()
             wolves_alive = [
-                p for p in alive if game.state.roles[p] == "werewolf"
+                p for p in alive if game.state.role_teams.get(game.state.roles[p]) == "werewolves"
             ]
             target = wolves_alive[0] if wolves_alive else alive[0]
             others = [p for p in alive if p != target]
@@ -88,12 +94,13 @@ async def test_full_game_with_mock():
 
 @pytest.mark.asyncio
 async def test_night_then_day_phase_transition():
-    game = WerewolfGame()
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    game = WerewolfGame(config)
 
     async def mock_run(prompt, **kwargs):
         if "夜晚" in str(prompt):
             villagers = [
-                p for p in game.state.alive_players if game.state.roles[p] == "villager"
+                p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) == "villagers"
             ]
             return _MockResult(
                 _resp(villagers[0], "kill", action="night_action")
@@ -122,13 +129,14 @@ async def test_night_then_day_phase_transition():
 
 @pytest.mark.asyncio
 async def test_memory_tracks_events():
-    game = WerewolfGame()
-    wolves = [p for p in game.state.roles if game.state.roles[p] == "werewolf"]
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    game = WerewolfGame(config)
+    wolves = [p for p in game.state.roles if game.state.role_teams.get(game.state.roles[p]) == "werewolves"]
 
     async def mock_run(prompt, **kwargs):
         if "夜晚" in str(prompt):
             villagers = [
-                p for p in game.state.alive_players if game.state.roles[p] == "villager"
+                p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) == "villagers"
             ]
             return _MockResult(_resp(villagers[0], "kill", action="night_action"))
         if "发言" in str(prompt) or "白天" in str(prompt):

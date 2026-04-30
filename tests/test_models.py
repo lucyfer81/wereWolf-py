@@ -1,3 +1,7 @@
+import pytest
+from pathlib import Path
+
+from src.config_loader import load_config, GameConfig
 from src.models import (
     PlayerMemory,
     WerewolfSharedMemory,
@@ -7,39 +11,46 @@ from src.models import (
     create_new_game_state,
 )
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
-def test_create_new_game():
-    state = create_new_game_state()
+
+@pytest.fixture
+def config() -> GameConfig:
+    return load_config(FIXTURE_DIR / "default-8p.yaml")
+
+
+def test_create_new_game(config):
+    state = create_new_game_state(config)
     assert len(state.alive_players) == 8
     assert state.alive_players == [
         "Seat1", "Seat2", "Seat3", "Seat4",
         "Seat5", "Seat6", "Seat7", "Seat8",
     ]
-    wolves = [p for p in state.alive_players if state.roles[p] == "werewolf"]
+    wolves = [p for p in state.alive_players if state.role_teams.get(state.roles[p]) == "werewolves"]
     assert len(wolves) == 2
     assert state.current_day == 1
     assert state.phase == "night"
     assert state.winner == "none"
 
 
-def test_check_win_villagers():
-    state = create_new_game_state()
-    wolves = [p for p in state.roles if state.roles[p] == "werewolf"]
+def test_check_win_villagers(config):
+    state = create_new_game_state(config)
+    wolves = [p for p in state.roles if state.role_teams.get(state.roles[p]) == "werewolves"]
     for w in wolves:
         state.alive_players.remove(w)
     assert state.check_win() == "villagers"
 
 
-def test_check_win_werewolves():
-    state = create_new_game_state()
-    villagers = [p for p in state.roles if state.roles[p] == "villager"]
+def test_check_win_werewolves(config):
+    state = create_new_game_state(config)
+    villagers = [p for p in state.roles if state.role_teams.get(state.roles[p]) == "villagers"]
     for v in villagers[1:]:
         state.alive_players.remove(v)
     assert state.check_win() == "werewolves"
 
 
-def test_check_win_none():
-    state = create_new_game_state()
+def test_check_win_none(config):
+    state = create_new_game_state(config)
     assert state.check_win() == "none"
 
 
@@ -90,7 +101,8 @@ def test_werewolf_shared_memory():
 def test_game_memory_context_villager():
     gm = GameMemory()
     gm.player_memories["Seat1"] = PlayerMemory()
-    ctx = gm.get_prompt_context("Seat1", "villager", 1)
+    role_teams = {"villager": "villagers", "werewolf": "werewolves"}
+    ctx = gm.get_prompt_context("Seat1", "villager", role_teams, 1)
     assert ctx == ""
 
 
@@ -98,17 +110,18 @@ def test_game_memory_context_werewolf():
     gm = GameMemory()
     gm.player_memories["Seat3"] = PlayerMemory()
     gm.werewolf_memory = WerewolfSharedMemory(teammates=["Seat3", "Seat7"])
-    ctx = gm.get_prompt_context("Seat3", "werewolf", 1)
+    role_teams = {"villager": "villagers", "werewolf": "werewolves"}
+    ctx = gm.get_prompt_context("Seat3", "werewolf", role_teams, 1)
     assert "狼人私有信息" in ctx
     assert "Seat7" in ctx
 
 
-def test_sort_alive():
-    state = create_new_game_state()
+def test_sort_alive(config):
+    state = create_new_game_state(config)
     state.alive_players = ["Seat5", "Seat2", "Seat8"]
     assert state.sort_alive() == ["Seat2", "Seat5", "Seat8"]
 
 
-def test_game_has_game_id():
-    state = create_new_game_state()
+def test_game_has_game_id(config):
+    state = create_new_game_state(config)
     assert len(state.game_id) == 8
