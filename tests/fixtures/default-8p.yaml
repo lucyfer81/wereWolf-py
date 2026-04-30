@@ -1,6 +1,6 @@
 meta:
   name: "默认8人局"
-  description: "2狼人 + 6村民"
+  description: "3狼人 + 预言家 + 守卫 + 3村民"
 
 game:
   total_players: 8
@@ -8,7 +8,7 @@ game:
 roles:
   werewolf:
     team: "werewolves"
-    count: 2
+    count: 3
     night_action: true
     shared_memory: true
     night_priority: 1
@@ -18,9 +18,29 @@ roles:
       夜晚时，与同伴商议并选择一个村民进行击杀。
     night_task_hint: "小提示：过于完美的推理可能引起注意，偶尔保持模糊更安全。"
 
+  seer:
+    team: "villagers"
+    count: 1
+    night_action: true
+    shared_memory: false
+    night_priority: 2
+    role_info_template: "你是预言家。你每晚可以查验一名玩家的身份（好人/狼人）。"
+    night_action_template: "夜晚时，请选择一名存活玩家进行查验，你将得知其身份。"
+    night_task_hint: ""
+
+  guard:
+    team: "villagers"
+    count: 1
+    night_action: true
+    shared_memory: false
+    night_priority: 3
+    role_info_template: "你是守卫。你每晚可以守护一名玩家，使其免于被狼人杀害。但你不能连续两晚守护同一个人。"
+    night_action_template: "夜晚时，请选择一名存活玩家进行守护，被守护的玩家今晚不会被狼人杀害。你不能连续两晚守护同一个人。"
+    night_task_hint: ""
+
   villager:
     team: "villagers"
-    count: 6
+    count: 3
     night_action: false
     shared_memory: false
     night_priority: 99
@@ -142,6 +162,19 @@ prompts:
     {% if observation %}
     你之前关注的观察对象：{{ observation }}
     {% endif %}
+
+  seer_night_task: |
+    现在是第 {{ day }} 天夜晚。
+    你是预言家。当前存活玩家：{{ alive_players | join('、') }}
+    请选择一名玩家进行查验，你将得知其身份（好人/狼人）。
+
+  guard_night_task: |
+    现在是第 {{ day }} 天夜晚。
+    你是守卫。当前存活玩家：{{ alive_players | join('、') }}
+    {% if last_guarded %}
+    你上一晚守护了：{{ last_guarded }}（不能连续两晚守护同一个人）。
+    {% endif %}
+    请选择今晚要守护的玩家。
 
   speech_task: |
     现在是第 {{ day }} 天白天。

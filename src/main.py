@@ -51,10 +51,37 @@ async def health():
     }
 
 
+@app.get("/api/configs")
+async def list_configs():
+    """列出所有可用的游戏配置"""
+    configs_dir = Path(__file__).parent.parent / "configs"
+    result = []
+    for f in sorted(configs_dir.glob("*.yaml")):
+        try:
+            cfg = load_config(f)
+            result.append({
+                "file": f.name,
+                "players": cfg.total_players,
+                "roles": {k: v.count for k, v in cfg.roles.items()},
+            })
+        except Exception:
+            pass
+    return {"configs": result}
+
+
 @app.post("/api/game/new")
-async def new_game(config_path: str | None = None):
+async def new_game(request: Request):
     global _current_game
-    path = Path(config_path) if config_path else DEFAULT_CONFIG
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    config_file = body.get("config_path")
+    configs_dir = Path(__file__).parent.parent / "configs"
+    if config_file:
+        path = configs_dir / Path(config_file).name
+    else:
+        path = DEFAULT_CONFIG
     config = load_config(path)
     _current_game = WerewolfGame(config)
     return {"state": _serialize_state(_current_game.state)}

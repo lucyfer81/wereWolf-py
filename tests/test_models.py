@@ -29,7 +29,7 @@ def test_create_new_game(config):
         "Seat5", "Seat6", "Seat7", "Seat8",
     ]
     wolves = [p for p in state.alive_players if state.role_teams.get(state.roles[p]) == "werewolves"]
-    assert len(wolves) == 2
+    assert len(wolves) == 3
     assert state.current_day == 1
     assert state.phase == "night"
     assert state.winner == "none"
@@ -140,7 +140,7 @@ def test_create_9p_game():
     assert role_counts["werewolf"] == 3
     assert role_counts["seer"] == 1
     assert role_counts["witch"] == 1
-    assert role_counts["hunter"] == 1
+    assert role_counts["guard"] == 1
     assert role_counts["villager"] == 3
 
 

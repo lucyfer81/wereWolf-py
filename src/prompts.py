@@ -100,6 +100,20 @@ def build_witch_night_task(
     )
 
 
+def build_guard_night_task(
+    config: GameConfig,
+    day: int,
+    alive_players: list[str],
+    last_guarded: str | None = None,
+) -> str:
+    return render_template(
+        config.prompts.get("guard_night_task", ""),
+        day=day,
+        alive_players=alive_players,
+        last_guarded=last_guarded or "",
+    )
+
+
 def build_speech_task(
     config: GameConfig,
     player: str,

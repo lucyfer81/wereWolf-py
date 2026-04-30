@@ -30,12 +30,12 @@ def test_create_game(game):
     assert len(state.alive_players) == 8
 
 
-def test_game_has_two_wolves(game):
+def test_game_has_three_wolves(game):
     wolves = [
         p for p in game.state.roles
         if game.state.role_teams.get(game.state.roles[p]) == "werewolves"
     ]
-    assert len(wolves) == 2
+    assert len(wolves) == 3
 
 
 def test_validate_speech_ok():

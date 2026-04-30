@@ -19,6 +19,7 @@ from src.llm import PlayerResponse, create_gm_agent, create_player_agent
 from src.prompts import (
     build_first_vote_task,
     build_gm_system_prompt,
+    build_guard_night_task,
     build_night_task,
     build_player_system_prompt,
     build_second_vote_task,
@@ -123,6 +124,7 @@ class WerewolfGame:
         self.config = config
         self.state = create_new_game_state(config)
         self._llm_timeout = config.settings.get("llm_timeout", 60)
+        self._last_guarded: str | None = None
 
     async def _call_agent(self, agent, task) -> PlayerResponse | None:
         try:
@@ -156,6 +158,7 @@ class WerewolfGame:
         )
 
         night_killed: str | None = None
+        guard_protected: str | None = None
         witch_save: str | None = None
         witch_poison: str | None = None
 
@@ -218,6 +221,22 @@ class WerewolfGame:
                             )
                         )
 
+            elif role_key == "guard":
+                for player in players_with_role:
+                    task = build_guard_night_task(
+                        config, state.current_day,
+                        state.alive_players, self._last_guarded,
+                    )
+                    sys_prompt = _get_player_sys_prompt(state, player, config)
+                    agent = create_player_agent(sys_prompt)
+                    resp = await self._call_agent(agent, task)
+                    if resp and resp.target in state.alive_players:
+                        if resp.target != self._last_guarded:
+                            guard_protected = resp.target
+                            self._last_guarded = resp.target
+                    else:
+                        self._last_guarded = None
+
             elif role_key == "witch":
                 for player in players_with_role:
                     if not night_killed:
@@ -254,7 +273,7 @@ class WerewolfGame:
 
         # Resolve deaths
         deaths: list[str] = []
-        if night_killed and night_killed != witch_save:
+        if night_killed and night_killed != witch_save and night_killed != guard_protected:
             deaths.append(night_killed)
         if witch_poison and witch_poison not in deaths:
             deaths.append(witch_poison)

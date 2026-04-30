@@ -16,8 +16,12 @@ class TestLoadConfig:
         config = load_config(FIXTURE_DIR / "default-8p.yaml")
         assert "werewolf" in config.roles
         assert "villager" in config.roles
-        assert config.roles["werewolf"].count == 2
-        assert config.roles["villager"].count == 6
+        assert "seer" in config.roles
+        assert "guard" in config.roles
+        assert config.roles["werewolf"].count == 3
+        assert config.roles["seer"].count == 1
+        assert config.roles["guard"].count == 1
+        assert config.roles["villager"].count == 3
 
     def test_voting_styles_parsed(self):
         config = load_config(FIXTURE_DIR / "default-8p.yaml")
@@ -96,9 +100,11 @@ def test_load_9p_config():
     assert config.total_players == 9
     assert "seer" in config.roles
     assert "witch" in config.roles
-    assert "hunter" in config.roles
+    assert "guard" in config.roles
     assert config.roles["werewolf"].count == 3
     assert config.roles["seer"].night_action is True
-    assert config.roles["hunter"].on_death_template is not None
+    assert config.roles["guard"].night_action is True
+    assert config.roles["guard"].night_priority == 3
+    assert config.roles["witch"].night_priority == 4
     errors = validate_config(config)
     assert errors == []

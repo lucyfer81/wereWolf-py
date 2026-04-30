@@ -1,6 +1,6 @@
 meta:
   name: "经典9人局"
-  description: "3狼人 + 预言家 + 女巫 + 猎人 + 3村民"
+  description: "3狼人 + 预言家 + 女巫 + 守卫 + 3村民"
 
 game:
   total_players: 9
@@ -33,21 +33,20 @@ roles:
     count: 1
     night_action: true
     shared_memory: false
-    night_priority: 3
+    night_priority: 4
     role_info_template: "你是女巫。你有一瓶解药（救人）和一瓶毒药（毒人），各只能用一次。"
     night_action_template: "夜晚时，你会得知今晚被杀的玩家。你可以选择使用解药救他，或使用毒药毒另一名玩家。"
     night_task_hint: ""
 
-  hunter:
+  guard:
     team: "villagers"
     count: 1
-    night_action: false
+    night_action: true
     shared_memory: false
-    night_priority: 99
-    role_info_template: "你是猎人。当你被投票出局或被狼人杀死时，你可以开枪带走一名玩家。"
-    night_action_template: ""
+    night_priority: 3
+    role_info_template: "你是守卫。你每晚可以守护一名玩家，使其免于被狼人杀害。但你不能连续两晚守护同一个人。"
+    night_action_template: "夜晚时，请选择一名存活玩家进行守护，被守护的玩家今晚不会被狼人杀害。你不能连续两晚守护同一个人。"
     night_task_hint: ""
-    on_death_template: "你被淘汰了！作为猎人，你可以选择带走一名玩家。请选择目标。"
 
   villager:
     team: "villagers"
@@ -192,6 +191,14 @@ prompts:
     {% endif %}
     当前存活玩家：{{ alive_players | join('、') }}
     请决定是否用药。如果不用药，target 填自己。
+
+  guard_night_task: |
+    现在是第 {{ day }} 天夜晚。
+    你是守卫。当前存活玩家：{{ alive_players | join('、') }}
+    {% if last_guarded %}
+    你上一晚守护了：{{ last_guarded }}（不能连续两晚守护同一个人）。
+    {% endif %}
+    请选择今晚要守护的玩家。
 
   speech_task: |
     现在是第 {{ day }} 天白天。
