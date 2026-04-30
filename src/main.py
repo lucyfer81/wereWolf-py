@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.game import WerewolfGame
@@ -15,6 +17,8 @@ load_dotenv()
 
 _current_game: WerewolfGame | None = None
 
+logger = logging.getLogger("werewolf")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +26,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception: %s\n%s", exc, traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"error": f"服务器内部错误: {exc}"},
+    )
 
 
 @app.get("/api/health")
@@ -101,9 +114,4 @@ def _serialize_state(state) -> dict:
     }
 
 
-@app.get("/")
-async def index():
-    return FileResponse("public/index.html")
-
-
-app.mount("/static", StaticFiles(directory="public"), name="static")
+app.mount("/", StaticFiles(directory="public", html=True), name="static")

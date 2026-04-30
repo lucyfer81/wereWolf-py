@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import random
 
 from src.models import (
@@ -21,6 +22,8 @@ from src.prompts import (
     build_summary_task,
 )
 from src.styles import VOTING_STYLE_CARDS, get_style_for_player
+
+LLM_TIMEOUT = 60
 
 
 def sort_seats(seats: list[str]) -> list[str]:
@@ -114,6 +117,19 @@ class WerewolfGame:
     def __init__(self):
         self.state = create_new_game_state()
 
+    async def _call_agent(self, agent, task) -> PlayerResponse | None:
+        try:
+            result = await asyncio.wait_for(agent.run(task), timeout=LLM_TIMEOUT)
+            return result.output
+        except Exception:
+            pass
+        try:
+            bak_agent = create_player_agent(use_bak=True)
+            result = await asyncio.wait_for(bak_agent.run(task), timeout=LLM_TIMEOUT)
+            return result.output
+        except Exception:
+            return None
+
     async def run_one_step(self) -> GameState:
         if self.state.winner != "none":
             return self.state
@@ -132,7 +148,6 @@ class WerewolfGame:
             state.phase = "day"
             return
 
-        agent = create_player_agent()
         targets: dict[str, int] = {}
 
         for wolf in wolves:
@@ -140,13 +155,12 @@ class WerewolfGame:
             observation = ""
             task = build_night_task(state.current_day, teammates, state.alive_players, observation)
             sys_prompt = _get_player_sys_prompt(state, wolf)
+            agent = create_player_agent(sys_prompt)
 
-            try:
-                result = await agent.run(task, system_prompt=sys_prompt)
-                target = result.output.target
-                if target in state.alive_players and state.roles.get(target) != "werewolf":
-                    targets[target] = targets.get(target, 0) + 1
-            except Exception:
+            resp = await self._call_agent(agent, task)
+            if resp and resp.target in state.alive_players and state.roles.get(resp.target) != "werewolf":
+                targets[resp.target] = targets.get(resp.target, 0) + 1
+            else:
                 villagers = [p for p in state.alive_players if state.roles[p] == "villager"]
                 if villagers:
                     t = random.choice(villagers)
@@ -215,17 +229,16 @@ class WerewolfGame:
                 evidence_facts=evidence_facts,
             )
 
-            agent = create_player_agent()
-            try:
-                result = await agent.run(task, system_prompt=sys_prompt)
-                resp = result.output
+            agent = create_player_agent(sys_prompt)
+            resp = await self._call_agent(agent, task)
+            if resp:
                 err = validate_speech(player, resp.content, resp.target, alive, state.current_day)
                 if err:
                     fb = build_fallback_speech(player, alive, state.current_day)
                     content, target = fb["content"], fb["target"]
                 else:
                     content, target = resp.content, resp.target
-            except Exception:
+            else:
                 fb = build_fallback_speech(player, alive, state.current_day)
                 content, target = fb["content"], fb["target"]
 
@@ -251,16 +264,16 @@ class WerewolfGame:
 
     async def _run_summary(self):
         state = self.state
-        agent = create_gm_agent()
 
         from src.prompts import build_gm_system_prompt
 
         sys_prompt = build_gm_system_prompt()
+        agent = create_gm_agent(sys_prompt)
         task = build_summary_task(
             state.current_day, state.day_progress.speeches, state.sort_alive()
         )
         try:
-            result = await agent.run(task, system_prompt=sys_prompt)
+            result = await asyncio.wait_for(agent.run(task), timeout=LLM_TIMEOUT)
             summary = result.output.summary
         except Exception:
             summary = f"第{state.current_day}天：玩家们进行了讨论。"
@@ -280,7 +293,6 @@ class WerewolfGame:
 
     async def _run_first_vote(self):
         state = self.state
-        agent = create_player_agent()
         alive = state.sort_alive()
 
         for player in alive:
@@ -297,34 +309,20 @@ class WerewolfGame:
                 own_speech=own_speech,
             )
 
-            try:
-                result = await agent.run(task, system_prompt=sys_prompt)
-                resp = result.output
-                err = validate_vote(player, resp.target, resp.alt_target, alive)
-                if err:
-                    fb = build_fallback_vote(player, alive)
-                    state.day_progress.initial_votes[player] = fb["target"]
-                    vr = VoteRecord(
-                        voter=player,
-                        target=fb["target"],
-                        alt_target=fb["alt_target"],
-                        confidence=fb["confidence"],
-                        risk_if_wrong=fb["risk_if_wrong"],
-                        target_vs_alt_reason=fb["target_vs_alt_reason"],
-                        evidence=fb["evidence"],
-                    )
-                else:
-                    state.day_progress.initial_votes[player] = resp.target
-                    vr = VoteRecord(
-                        voter=player,
-                        target=resp.target,
-                        alt_target=resp.alt_target,
-                        confidence=resp.confidence,
-                        risk_if_wrong=resp.risk_if_wrong,
-                        target_vs_alt_reason=resp.target_vs_alt_reason,
-                        evidence=resp.evidence,
-                    )
-            except Exception:
+            agent = create_player_agent(sys_prompt)
+            resp = await self._call_agent(agent, task)
+            if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
+                state.day_progress.initial_votes[player] = resp.target
+                vr = VoteRecord(
+                    voter=player,
+                    target=resp.target,
+                    alt_target=resp.alt_target,
+                    confidence=resp.confidence,
+                    risk_if_wrong=resp.risk_if_wrong,
+                    target_vs_alt_reason=resp.target_vs_alt_reason,
+                    evidence=resp.evidence,
+                )
+            else:
                 fb = build_fallback_vote(player, alive)
                 state.day_progress.initial_votes[player] = fb["target"]
                 vr = VoteRecord(
@@ -351,7 +349,6 @@ class WerewolfGame:
 
     async def _run_second_vote(self):
         state = self.state
-        agent = create_player_agent()
         alive = state.sort_alive()
 
         for player in alive:
@@ -372,35 +369,22 @@ class WerewolfGame:
                 own_speech=own_speech,
             )
 
-            try:
-                result = await agent.run(task, system_prompt=sys_prompt)
-                resp = result.output
-                err = validate_vote(player, resp.target, resp.alt_target, alive)
-                if err:
-                    fb = build_fallback_vote(player, alive)
-                    vr = VoteRecord(
-                        voter=player,
-                        target=fb["target"],
-                        alt_target=fb["alt_target"],
-                        confidence=fb["confidence"],
-                        risk_if_wrong=fb["risk_if_wrong"],
-                        target_vs_alt_reason=fb["target_vs_alt_reason"],
-                        evidence=fb["evidence"],
-                    )
-                else:
-                    changed = resp.changed_vote and len(resp.why_change) >= 5
-                    vr = VoteRecord(
-                        voter=player,
-                        target=resp.target,
-                        alt_target=resp.alt_target,
-                        confidence=resp.confidence,
-                        risk_if_wrong=resp.risk_if_wrong,
-                        target_vs_alt_reason=resp.target_vs_alt_reason,
-                        evidence=resp.evidence,
-                        changed_vote=changed,
-                        why_change=resp.why_change if changed else "",
-                    )
-            except Exception:
+            agent = create_player_agent(sys_prompt)
+            resp = await self._call_agent(agent, task)
+            if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
+                changed = resp.changed_vote and len(resp.why_change) >= 5
+                vr = VoteRecord(
+                    voter=player,
+                    target=resp.target,
+                    alt_target=resp.alt_target,
+                    confidence=resp.confidence,
+                    risk_if_wrong=resp.risk_if_wrong,
+                    target_vs_alt_reason=resp.target_vs_alt_reason,
+                    evidence=resp.evidence,
+                    changed_vote=changed,
+                    why_change=resp.why_change if changed else "",
+                )
+            else:
                 fb = build_fallback_vote(player, alive)
                 vr = VoteRecord(
                     voter=player,
@@ -442,7 +426,7 @@ class WerewolfGame:
                         content=f"{eliminated} 被投票处决（{max_votes}票）",
                         alive_players=list(state.alive_players),
                     )
-            )
+                )
 
         winner = state.check_win()
         if winner != "none":

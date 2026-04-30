@@ -42,6 +42,16 @@ def _get_model(model_name: str | None = None) -> OpenAIChatModel:
     return OpenAIChatModel(name, provider=provider)
 
 
+def _get_bak_model() -> OpenAIChatModel | None:
+    name = os.getenv("SILICONFLOW_BAK_MODEL", "")
+    if not name:
+        return None
+    base_url = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
+    api_key = os.getenv("SILICONFLOW_API_KEY", "")
+    provider = OpenAIProvider(base_url=base_url, api_key=api_key)
+    return OpenAIChatModel(name, provider=provider)
+
+
 def _get_gm_model() -> OpenAIChatModel:
     base_url = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
     api_key = os.getenv("SILICONFLOW_API_KEY", "")
@@ -57,23 +67,25 @@ def _siliconflow_settings(temperature: float) -> ModelSettings:
     )
 
 
-def create_player_agent() -> Agent:
-    model = _get_model()
+def create_player_agent(system_prompt: str = "", use_bak: bool = False) -> Agent:
+    model = _get_bak_model() if use_bak else _get_model()
     return Agent(
         model=model,
         output_type=PlayerResponse,
         retries=3,
         model_settings=_siliconflow_settings(0.7),
+        system_prompt=system_prompt,
     )
 
 
-def create_gm_agent() -> Agent:
+def create_gm_agent(system_prompt: str = "") -> Agent:
     model = _get_gm_model()
     return Agent(
         model=model,
         output_type=GMSummary,
         retries=3,
         model_settings=_siliconflow_settings(0.2),
+        system_prompt=system_prompt,
     )
 
 

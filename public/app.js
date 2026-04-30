@@ -27,17 +27,29 @@ function setBusy(nextBusy) {
   updateExportLogButtonState();
 }
 
-async function requestJson(path, payload) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload ?? {}),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || `请求失败: ${response.status}`);
+async function requestJson(path, payload, retries = 2) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      throw new Error(`服务器返回非 JSON 响应 (${response.status})`);
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `请求失败: ${response.status}`);
+    }
+    return data;
   }
-  return data;
 }
 
 function renderStatus() {
@@ -87,7 +99,7 @@ function renderChips() {
 function renderTimeline() {
   const timeline = currentState?.timeline ?? [];
   if (!timeline.length) {
-    ui.timeline.textContent = "暂无日志。";
+    ui.timeline.textContent = currentState ? "暂无日志。" : "点击\"新建对局\"开始。";
     ui.timeline.classList.add("empty");
     updateExportLogButtonState();
     return;
