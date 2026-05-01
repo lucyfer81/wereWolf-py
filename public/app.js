@@ -7,6 +7,7 @@ const ui = {
   runBtn: document.getElementById("run-btn"),
   exportLogBtn: document.getElementById("export-log-btn"),
   maxStepsInput: document.getElementById("max-steps-input"),
+  configSelect: document.getElementById("config-select"),
   statusList: document.getElementById("status-list"),
   aliveList: document.getElementById("alive-list"),
   rolesList: document.getElementById("roles-list"),
@@ -195,7 +196,9 @@ function renderAll() {
 async function createNewGame() {
   setBusy(true);
   try {
-    const result = await requestJson("/api/game/new");
+    const configFile = ui.configSelect.value;
+    const payload = configFile ? { config_path: configFile } : {};
+    const result = await requestJson("/api/game/new", payload);
     currentState = result.state;
     renderAll();
   } finally {
@@ -288,4 +291,25 @@ window.advanceTime = async (ms) => {
   }
 };
 
+async function loadConfigs() {
+  try {
+    const resp = await fetch("/api/configs");
+    const data = await resp.json();
+    ui.configSelect.innerHTML = "";
+    data.configs.forEach((cfg) => {
+      const option = document.createElement("option");
+      option.value = cfg.file;
+      const roles = Object.entries(cfg.roles)
+        .filter(([, count]) => count > 0)
+        .map(([role, count]) => `${count}${role === "werewolf" ? "狼" : role === "seer" ? "预言家" : role === "witch" ? "女巫" : role === "guard" ? "守卫" : role === "hunter" ? "猎人" : "村民"}`)
+        .join("+");
+      option.textContent = `${cfg.players}人局 (${roles})`;
+      ui.configSelect.appendChild(option);
+    });
+  } catch {
+    ui.configSelect.innerHTML = '<option value="">默认配置</option>';
+  }
+}
+
+loadConfigs();
 renderAll();
