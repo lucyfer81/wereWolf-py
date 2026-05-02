@@ -232,14 +232,16 @@ class WerewolfGame:
                     )
                     sys_prompt = _get_player_sys_prompt(state, wolf, config)
                     agent = create_player_agent(sys_prompt)
-                    resp = await self._call_agent(agent, task)
+                    resp = await self._call_agent(agent, task, player=wolf, role="werewolf", model_name="primary")
                     if (
                         resp
                         and resp.target in state.alive_players
                         and state.role_teams.get(state.roles.get(resp.target)) != "werewolves"
                     ):
                         targets[resp.target] = targets.get(resp.target, 0) + 1
+                        self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target)
                     else:
+                        self.log.log("fallback", where="werewolf_night", player=wolf, reason="LLM 返回无效目标")
                         non_wolves = [
                             p for p in state.alive_players
                             if state.role_teams.get(state.roles[p]) != "werewolves"
@@ -260,7 +262,7 @@ class WerewolfGame:
                     )
                     sys_prompt = _get_player_sys_prompt(state, player, config)
                     agent = create_player_agent(sys_prompt)
-                    resp = await self._call_agent(agent, task)
+                    resp = await self._call_agent(agent, task, player=player, role="seer", model_name="primary")
                     if resp and resp.target in state.alive_players:
                         target_role = state.roles[resp.target]
                         team = state.role_teams.get(target_role, "villagers")
@@ -272,6 +274,9 @@ class WerewolfGame:
                                 result=result,
                             )
                         )
+                        self.log.log("night_action", day=state.current_day, player=player, role="seer", target=resp.target, result=result)
+                    else:
+                        self.log.log("fallback", where="seer_night", player=player, reason="LLM 返回无效目标")
 
             elif role_key == "guard":
                 for player in players_with_role:
@@ -281,13 +286,17 @@ class WerewolfGame:
                     )
                     sys_prompt = _get_player_sys_prompt(state, player, config)
                     agent = create_player_agent(sys_prompt)
-                    resp = await self._call_agent(agent, task)
+                    resp = await self._call_agent(agent, task, player=player, role="guard", model_name="primary")
                     if resp and resp.target in state.alive_players:
                         if resp.target != self._last_guarded:
                             guard_protected = resp.target
                             self._last_guarded = resp.target
+                            self.log.log("night_action", day=state.current_day, player=player, role="guard", target=resp.target)
+                        else:
+                            self.log.log("fallback", where="guard_night", player=player, reason="连续守护同一人，无效")
                     else:
                         self._last_guarded = None
+                        self.log.log("fallback", where="guard_night", player=player, reason="LLM 返回无效目标")
 
             elif role_key == "witch":
                 for player in players_with_role:
@@ -307,7 +316,7 @@ class WerewolfGame:
                     )
                     sys_prompt = _get_player_sys_prompt(state, player, config)
                     agent = create_player_agent(sys_prompt)
-                    resp = await self._call_agent(agent, task)
+                    resp = await self._call_agent(agent, task, player=player, role="witch", model_name="primary")
                     if resp:
                         if (
                             resp.target == night_killed
@@ -315,6 +324,7 @@ class WerewolfGame:
                         ):
                             witch_save = night_killed
                             ws["antidote_used"] = True
+                            self.log.log("night_action", day=state.current_day, player=player, role="witch", target=resp.target, action="save")
                         elif (
                             resp.target != night_killed
                             and resp.target in state.alive_players
@@ -322,6 +332,9 @@ class WerewolfGame:
                         ):
                             witch_poison = resp.target
                             ws["poison_used"] = True
+                            self.log.log("night_action", day=state.current_day, player=player, role="witch", target=resp.target, action="poison")
+                    else:
+                        self.log.log("fallback", where="witch_night", player=player, reason="LLM 无响应")
 
         # Resolve deaths
         deaths: list[str] = []
@@ -344,6 +357,7 @@ class WerewolfGame:
                     alive_players=list(state.alive_players),
                 )
             )
+            self.log.log("death", day=state.current_day, phase="night", player=dead, role=state.roles[dead], cause="killed")
 
         # Trigger hunter on-death
         for dead in deaths:
@@ -379,7 +393,7 @@ class WerewolfGame:
         task = render_template(role_cfg.on_death_template)
         task += f"\n当前存活玩家：{', '.join(alive)}"
 
-        resp = await self._call_agent(agent, task)
+        resp = await self._call_agent(agent, task, player=hunter, role="hunter", model_name="primary")
         shot_target = None
         if resp and resp.target in alive:
             shot_target = resp.target
@@ -400,6 +414,8 @@ class WerewolfGame:
                     alive_players=list(state.alive_players),
                 )
             )
+            self.log.log("death", day=state.current_day, phase="night", player=shot_target, role=state.roles[shot_target], cause="hunter_shot")
+            self.log.log("night_action", day=state.current_day, player=hunter, role="hunter", target=shot_target)
 
     async def _run_day_phase(self):
         state = self.state
