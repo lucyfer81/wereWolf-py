@@ -455,15 +455,20 @@ class WerewolfGame:
             )
 
             agent = create_player_agent(sys_prompt)
-            resp = await self._call_agent(agent, task)
+            is_fallback = False
+            resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
             if resp:
                 err = validate_speech(player, resp.content, resp.target, alive, state.current_day)
                 if err:
+                    is_fallback = True
+                    self.log.log("fallback", where="speech", player=player, reason=err)
                     fb = build_fallback_speech(player, alive, state.current_day)
                     content, target = fb["content"], fb["target"]
                 else:
                     content, target = resp.content, resp.target
             else:
+                is_fallback = True
+                self.log.log("fallback", where="speech", player=player, reason="LLM 无响应")
                 fb = build_fallback_speech(player, alive, state.current_day)
                 content, target = fb["content"], fb["target"]
 
@@ -471,6 +476,8 @@ class WerewolfGame:
             state.memory.player_memories[player].speech_log.setdefault(
                 state.current_day, []
             ).append(SpeechRecord(speaker=player, content=content, target=target))
+
+            self.log.log("speech", day=state.current_day, player=player, role=state.roles[player], content=content, target=target, is_fallback=is_fallback)
 
             state.timeline.append(
                 PublicEvent(
@@ -500,9 +507,11 @@ class WerewolfGame:
             result = await asyncio.wait_for(agent.run(task), timeout=self._llm_timeout)
             summary = result.output.summary
         except Exception:
+            self.log.log("fallback", where="summary", player="GM", reason="GM 摘要生成失败")
             summary = f"第{state.current_day}天：玩家们进行了讨论。"
 
         state.day_progress.day_summary = summary
+        self.log.log("summary", day=state.current_day, content=summary)
         state.timeline.append(
             PublicEvent(
                 day=state.current_day,
@@ -536,7 +545,7 @@ class WerewolfGame:
             )
 
             agent = create_player_agent(sys_prompt)
-            resp = await self._call_agent(agent, task)
+            resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
             if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
                 state.day_progress.initial_votes[player] = resp.target
                 vr = VoteRecord(
@@ -548,7 +557,9 @@ class WerewolfGame:
                     target_vs_alt_reason=resp.target_vs_alt_reason,
                     evidence=resp.evidence,
                 )
+                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="first", target=resp.target, alt_target=resp.alt_target, evidence=resp.evidence, changed_vote=False, is_fallback=False)
             else:
+                self.log.log("fallback", where="first_vote", player=player, reason="LLM 返回无效投票")
                 fb = build_fallback_vote(player, alive)
                 state.day_progress.initial_votes[player] = fb["target"]
                 vr = VoteRecord(
@@ -560,6 +571,7 @@ class WerewolfGame:
                     target_vs_alt_reason=fb["target_vs_alt_reason"],
                     evidence=fb["evidence"],
                 )
+                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="first", target=fb["target"], alt_target=fb["alt_target"], evidence=fb["evidence"], changed_vote=False, is_fallback=True)
 
             state.memory.player_memories[player].vote_log.setdefault(
                 state.current_day, []
@@ -598,7 +610,7 @@ class WerewolfGame:
             )
 
             agent = create_player_agent(sys_prompt)
-            resp = await self._call_agent(agent, task)
+            resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
             if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
                 changed = resp.changed_vote and len(resp.why_change) >= 5
                 vr = VoteRecord(
@@ -612,7 +624,9 @@ class WerewolfGame:
                     changed_vote=changed,
                     why_change=resp.why_change if changed else "",
                 )
+                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="second", target=resp.target, alt_target=resp.alt_target, evidence=resp.evidence, changed_vote=changed, why_change=resp.why_change if changed else "", is_fallback=False)
             else:
+                self.log.log("fallback", where="second_vote", player=player, reason="LLM 返回无效投票")
                 fb = build_fallback_vote(player, alive)
                 vr = VoteRecord(
                     voter=player,
@@ -623,6 +637,7 @@ class WerewolfGame:
                     target_vs_alt_reason=fb["target_vs_alt_reason"],
                     evidence=fb["evidence"],
                 )
+                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="second", target=fb["target"], alt_target=fb["alt_target"], evidence=fb["evidence"], changed_vote=False, is_fallback=True)
 
             state.day_progress.final_votes[player] = vr
             state.memory.player_memories[player].vote_log.setdefault(
@@ -655,6 +670,8 @@ class WerewolfGame:
                         alive_players=list(state.alive_players),
                     )
                 )
+                self.log.log("death", day=state.current_day, phase="day", player=eliminated, role=state.roles[eliminated], cause="voted", votes=max_votes)
+                self.log.log("phase_end", day=state.current_day, phase="day", stage="resolve", eliminated=eliminated)
 
         winner = state.check_win()
         if winner != "none":
