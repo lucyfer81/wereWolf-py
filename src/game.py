@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time as _time
+import traceback as _traceback
+from pathlib import Path
 
 from src.config_loader import GameConfig, render_template
+from src.logger import GameLogger
 from src.models import (
     DayProgress,
     GameState,
@@ -120,11 +124,19 @@ def _get_player_sys_prompt(state: GameState, player: str, config: GameConfig) ->
 
 
 class WerewolfGame:
-    def __init__(self, config: GameConfig):
+    def __init__(self, config: GameConfig, log_dir: Path | None = None):
         self.config = config
         self.state = create_new_game_state(config)
         self._llm_timeout = config.settings.get("llm_timeout", 60)
         self._last_guarded: str | None = None
+        self._step_count = 0
+        self.log = GameLogger(self.state.game_id, log_dir=log_dir)
+        self.log.log(
+            "game_start",
+            game_id=self.state.game_id,
+            roles=dict(self.state.roles),
+            alive_players=list(self.state.alive_players),
+        )
 
     async def _call_agent(self, agent, task) -> PlayerResponse | None:
         try:
@@ -142,10 +154,16 @@ class WerewolfGame:
     async def run_one_step(self) -> GameState:
         if self.state.winner != "none":
             return self.state
+        self._step_count += 1
         if self.state.phase == "night":
+            self.log.log("phase_start", day=self.state.current_day, phase="night", alive_players=list(self.state.alive_players))
             await self._run_night_phase()
         elif self.state.phase == "day":
+            stage = self.state.day_progress.stage
+            self.log.log("phase_start", day=self.state.current_day, phase="day", stage=stage, alive_players=list(self.state.alive_players))
             await self._run_day_phase()
+        if self.state.winner != "none":
+            self.log.log("game_end", winner=self.state.winner, total_steps=self._step_count, alive_players=list(self.state.alive_players))
         return self.state
 
     async def _run_night_phase(self):

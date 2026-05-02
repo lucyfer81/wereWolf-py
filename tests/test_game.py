@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pathlib import Path
 
@@ -104,3 +106,15 @@ def test_game_state_serializable(game):
     assert state.game_id
     assert isinstance(state.roles, dict)
     assert isinstance(state.alive_players, list)
+
+
+def test_game_creates_log_file(config, tmp_path):
+    from src.logger import GameLogger
+    game = WerewolfGame(config, log_dir=tmp_path)
+    assert game.log is not None
+    log_file = tmp_path / f"game-{game.state.game_id}.jsonl"
+    assert log_file.exists()
+    records = [json.loads(line) for line in log_file.read_text().strip().split("\n") if line]
+    assert records[0]["type"] == "game_start"
+    assert records[0]["game_id"] == game.state.game_id
+    assert "roles" in records[0]
