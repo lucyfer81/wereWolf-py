@@ -138,18 +138,52 @@ class WerewolfGame:
             alive_players=list(self.state.alive_players),
         )
 
-    async def _call_agent(self, agent, task) -> PlayerResponse | None:
+    async def _call_agent(self, agent, task, player: str = "", role: str = "", model_name: str = "") -> PlayerResponse | None:
+        self.log.log(
+            "llm_request",
+            player=player, role=role, model=model_name,
+            system_prompt=getattr(agent, "_system_prompt", "") if isinstance(getattr(agent, "_system_prompt", ""), str) else "",
+            task=task,
+        )
+        start = _time.monotonic()
         try:
             result = await asyncio.wait_for(agent.run(task), timeout=self._llm_timeout)
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log(
+                "llm_response",
+                player=player, role=role, model=model_name,
+                response=result.output.model_dump() if hasattr(result.output, "model_dump") else str(result.output),
+                elapsed_ms=elapsed, ok=True,
+            )
             return result.output
-        except Exception:
-            pass
+        except asyncio.TimeoutError:
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log("llm_timeout", player=player, role=role, model=model_name, elapsed_ms=elapsed)
+        except Exception as e:
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log("llm_error", player=player, role=role, model=model_name, elapsed_ms=elapsed, error_msg=str(e), traceback=_traceback.format_exc())
+
+        # backup model retry
+        start = _time.monotonic()
         try:
             bak_agent = create_player_agent(use_bak=True)
+            self.log.log("llm_request", player=player, role=role, model="backup", task=task)
             result = await asyncio.wait_for(bak_agent.run(task), timeout=self._llm_timeout)
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log(
+                "llm_response",
+                player=player, role=role, model="backup",
+                response=result.output.model_dump() if hasattr(result.output, "model_dump") else str(result.output),
+                elapsed_ms=elapsed, ok=True,
+            )
             return result.output
-        except Exception:
-            return None
+        except asyncio.TimeoutError:
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log("llm_timeout", player=player, role=role, model="backup", elapsed_ms=elapsed)
+        except Exception as e:
+            elapsed = int((_time.monotonic() - start) * 1000)
+            self.log.log("llm_error", player=player, role=role, model="backup", elapsed_ms=elapsed, error_msg=str(e), traceback=_traceback.format_exc())
+        return None
 
     async def run_one_step(self) -> GameState:
         if self.state.winner != "none":
