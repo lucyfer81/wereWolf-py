@@ -217,10 +217,14 @@ async def test_memory_tracks_events():
     ):
         # Run night
         await game.run_one_step()
-        # Check death was tracked in memory
-        if game.state.timeline:
-            death_events = [e for e in game.state.timeline if e.type == "death"]
+        # Check death was tracked in memory (or peaceful night announced)
+        death_events = [e for e in game.state.timeline if e.type == "death"]
+        if death_events:
             assert len(death_events) == 1
             # Check player memories have death logged
             for pm in game.state.memory.player_memories.values():
                 assert 1 in pm.death_log
+        else:
+            # Peaceful night: should have an announcement
+            announcement_events = [e for e in game.state.timeline if e.type == "announcement"]
+            assert len(announcement_events) >= 1

@@ -411,6 +411,20 @@ class WerewolfGame:
             )
             self.log.log("death", day=state.current_day, phase="night", player=dead, role=state.roles[dead], cause="killed")
 
+        # Announce peaceful night if no deaths
+        if not deaths:
+            state.timeline.append(
+                PublicEvent(
+                    day=state.current_day,
+                    phase="night",
+                    type="announcement",
+                    speaker="GameMaster",
+                    content="昨晚是平安夜，无人死亡。",
+                    alive_players=list(state.alive_players),
+                )
+            )
+            self.log.log("announcement", day=state.current_day, phase="night", content="peaceful_night")
+
         # Trigger hunter on-death
         for dead in deaths:
             if state.roles[dead] == "hunter":
