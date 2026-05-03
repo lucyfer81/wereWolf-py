@@ -228,3 +228,125 @@ async def test_memory_tracks_events():
             # Peaceful night: should have an announcement
             announcement_events = [e for e in game.state.timeline if e.type == "announcement"]
             assert len(announcement_events) >= 1
+
+
+@pytest.mark.asyncio
+async def test_wolf_two_round_voting():
+    """Wolves do two rounds of voting when no majority in round 1."""
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    game = WerewolfGame(config)
+    r1_count = 0
+    r2_count = 0
+
+    async def mock_run(prompt, **kwargs):
+        nonlocal r1_count, r2_count
+        prompt_str = str(prompt)
+
+        if "第二轮" in prompt_str:
+            r2_count += 1
+            # All wolves agree on first non-wolf in round 2
+            non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
+            return _MockResult(_resp(non_wolves[0], "r2 consensus", action="night_action"))
+
+        if "击杀" in prompt_str or "杀目标" in prompt_str:
+            # Wolf round 1 prompt contains "击杀目标"
+            r1_count += 1
+            # Each wolf picks a different target in round 1
+            non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
+            idx = (r1_count - 1) % len(non_wolves)
+            return _MockResult(_resp(non_wolves[idx], f"r1 split", action="night_action"))
+
+        if "查验" in prompt_str:
+            # Seer night action - target a wolf
+            wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) == "werewolves"]
+            target = wolves[0] if wolves else game.state.alive_players[0]
+            return _MockResult(_resp(target, "seer check", action="night_action"))
+
+        if "守护" in prompt_str:
+            # Guard protects a wolf (not the wolf kill target) so guard doesn't block
+            wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) == "werewolves"]
+            return _MockResult(_resp(wolves[0], "guard a wolf", action="night_action"))
+
+        if "终投" in prompt_str or "初投" in prompt_str:
+            alive = game.state.sort_alive()
+            wolves_alive = [p for p in alive if game.state.role_teams.get(game.state.roles[p]) == "werewolves"]
+            target = wolves_alive[0] if wolves_alive else alive[0]
+            others = [p for p in alive if p != target]
+            alt = others[0] if others else alive[0]
+            return _MockResult(_resp(target, f"投{target}", action="vote", alt_target=alt))
+
+        if "发言" in prompt_str or "白天" in prompt_str:
+            alive = game.state.sort_alive()
+            others = [p for p in alive if p != "Seat1"]
+            target = others[0] if others else alive[0]
+            return _MockResult(_resp(target, f"speech", action="speech"))
+
+        return _MockResult(GMSummary(summary="summary"))
+
+    mock_agent = AsyncMock()
+    mock_agent.run = mock_run
+
+    with (
+        patch("src.game.create_player_agent", return_value=mock_agent),
+        patch("src.game.create_gm_agent", return_value=mock_agent),
+    ):
+        await game.run_one_step()  # night
+
+    # Round 1: 3 wolf calls. Round 2: 3 wolf calls (because 3 wolves split in r1).
+    assert r1_count == 3
+    assert r2_count == 3
+    # Someone should have been killed (wolves agreed in round 2)
+    death_events = [e for e in game.state.timeline if e.type == "death"]
+    assert len(death_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_peaceful_night_announcement():
+    """When no one dies at night, a peaceful night announcement appears."""
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    game = WerewolfGame(config)
+    call_idx = 0
+
+    async def mock_run(prompt, **kwargs):
+        nonlocal call_idx
+        call_idx += 1
+        prompt_str = str(prompt)
+
+        if "第二轮" in prompt_str:
+            # Wolves still disagree in round 2 - each picks different target
+            non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
+            idx = call_idx % len(non_wolves)
+            return _MockResult(_resp(non_wolves[idx], "still disagree", action="night_action"))
+
+        if "击杀" in prompt_str or "杀目标" in prompt_str:
+            # Wolf round 1 - each wolf picks a different target
+            non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
+            idx = call_idx % len(non_wolves)
+            return _MockResult(_resp(non_wolves[idx], "kill", action="night_action"))
+
+        if "查验" in prompt_str or "守护" in prompt_str:
+            # Seer or guard night action
+            non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
+            return _MockResult(_resp(non_wolves[0], "night action", action="night_action"))
+
+        if "终投" in prompt_str or "初投" in prompt_str:
+            alive = game.state.sort_alive()
+            return _MockResult(_resp(alive[0], "vote", action="vote", alt_target=alive[1]))
+        if "发言" in prompt_str or "白天" in prompt_str:
+            alive = game.state.sort_alive()
+            return _MockResult(_resp(alive[-1], "speech", action="speech"))
+        return _MockResult(GMSummary(summary="summary"))
+
+    mock_agent = AsyncMock()
+    mock_agent.run = mock_run
+
+    with (
+        patch("src.game.create_player_agent", return_value=mock_agent),
+        patch("src.game.create_gm_agent", return_value=mock_agent),
+    ):
+        await game.run_one_step()  # night
+
+    # Should have a peaceful night announcement
+    announcements = [e for e in game.state.timeline if e.type == "announcement"]
+    assert len(announcements) == 1
+    assert "平安夜" in announcements[0].content
