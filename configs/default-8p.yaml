@@ -163,6 +163,18 @@ prompts:
     你之前关注的观察对象：{{ observation }}
     {% endif %}
 
+  wolf_second_round_task: |
+    现在是第 {{ day }} 天夜晚，第二轮协商。
+    {{ role_specific_night_instruction }}
+    当前存活玩家：{{ alive_players | join('、') }}
+
+    第一轮投票结果：
+    {{ first_round_summary }}
+
+    规则：如果这一轮你们仍无法统一目标（过半数），今晚将不杀人。
+    请根据第一轮投票结果，选择你的最终击杀目标。
+    {{ night_task_hint }}
+
   seer_night_task: |
     现在是第 {{ day }} 天夜晚。
     你是预言家。当前存活玩家：{{ alive_players | join('、') }}
