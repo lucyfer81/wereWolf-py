@@ -223,10 +223,13 @@ class WerewolfGame:
                 continue
 
             if role_key == "werewolf":
-                # Collect votes from all wolves
+                wolves = players_with_role
+
+                # --- Round 1: independent votes ---
+                round1_votes: dict[str, str] = {}  # wolf -> target
                 targets: dict[str, int] = {}
-                for wolf in players_with_role:
-                    teammates = [w for w in players_with_role if w != wolf]
+                for wolf in wolves:
+                    teammates = [w for w in wolves if w != wolf]
                     task = build_night_task(
                         config, state.current_day, teammates,
                         state.alive_players,
@@ -239,22 +242,70 @@ class WerewolfGame:
                         and resp.target in state.alive_players
                         and state.role_teams.get(state.roles.get(resp.target)) != "werewolves"
                     ):
+                        round1_votes[wolf] = resp.target
                         targets[resp.target] = targets.get(resp.target, 0) + 1
-                        self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target)
+                        self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target, round=1)
                     else:
-                        self.log.log("fallback", where="werewolf_night", player=wolf, reason="LLM 返回无效目标")
+                        self.log.log("fallback", where="werewolf_night_r1", player=wolf, reason="LLM 返回无效目标")
                         non_wolves = [
                             p for p in state.alive_players
                             if state.role_teams.get(state.roles[p]) != "werewolves"
                         ]
                         if non_wolves:
                             t = random.choice(non_wolves)
+                            round1_votes[wolf] = t
                             targets[t] = targets.get(t, 0) + 1
 
-                if targets:
-                    max_votes = max(targets.values())
-                    top_targets = [t for t, c in targets.items() if c == max_votes]
-                    night_killed = sort_seats(top_targets)[0]
+                # Check if already majority
+                total_wolves = len(wolves)
+                majority_target = None
+                for t, c in targets.items():
+                    if c > total_wolves / 2:
+                        majority_target = t
+                        break
+
+                if majority_target:
+                    night_killed = majority_target
+                    self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=night_killed, round=1, result="majority_reached")
+                elif targets and total_wolves > 1:
+                    # --- Round 2: negotiate with first round results ---
+                    first_round_summary = "第一轮投票分布：\n"
+                    for target in sort_seats(targets.keys()):
+                        voters = [w for w, t in round1_votes.items() if t == target]
+                        first_round_summary += f"  {target} ← {', '.join(sort_seats(voters))} ({len(voters)}票)\n"
+
+                    round2_targets: dict[str, int] = {}
+                    for wolf in wolves:
+                        teammates = [w for w in wolves if w != wolf]
+                        task = build_wolf_second_round_task(
+                            config, state.current_day, teammates,
+                            state.alive_players, first_round_summary,
+                        )
+                        sys_prompt = _get_player_sys_prompt(state, wolf, config)
+                        agent = create_player_agent(sys_prompt)
+                        resp = await self._call_agent(agent, task, player=wolf, role="werewolf", model_name="primary")
+                        if (
+                            resp
+                            and resp.target in state.alive_players
+                            and state.role_teams.get(state.roles.get(resp.target)) != "werewolves"
+                        ):
+                            round2_targets[resp.target] = round2_targets.get(resp.target, 0) + 1
+                            self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target, round=2)
+                        else:
+                            self.log.log("fallback", where="werewolf_night_r2", player=wolf, reason="LLM 返回无效目标")
+
+                    # Resolve round 2: need majority
+                    for t, c in round2_targets.items():
+                        if c > total_wolves / 2:
+                            night_killed = t
+                            self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=t, round=2, result="majority_reached")
+                            break
+                    else:
+                        # No majority in round 2: no kill tonight
+                        self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target="none", round=2, result="no_consensus")
+                elif targets:
+                    # Only 1 wolf, use their target directly
+                    night_killed = list(targets.keys())[0]
 
             elif role_key == "seer":
                 for player in players_with_role:
