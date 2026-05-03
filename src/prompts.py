@@ -70,6 +70,23 @@ def build_night_task(
     )
 
 
+def build_wolf_second_round_task(
+    config: GameConfig,
+    day: int,
+    teammates: list[str],
+    alive_players: list[str],
+    first_round_summary: str,
+) -> str:
+    return render_template(
+        config.prompts["wolf_second_round_task"],
+        day=day,
+        role_specific_night_instruction=f"你是狼人。你的同伴：{', '.join(teammates) or '（无）'}",
+        alive_players=alive_players,
+        first_round_summary=first_round_summary,
+        night_task_hint=config.roles["werewolf"].night_task_hint,
+    )
+
+
 def build_seer_night_task(
     config: GameConfig,
     day: int,

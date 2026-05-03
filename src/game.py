@@ -31,6 +31,7 @@ from src.prompts import (
     build_speech_task,
     build_summary_task,
     build_witch_night_task,
+    build_wolf_second_round_task,
 )
 from src.styles import get_style_for_player, get_style_card
 
