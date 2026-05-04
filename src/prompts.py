@@ -91,11 +91,13 @@ def build_seer_night_task(
     config: GameConfig,
     day: int,
     alive_players: list[str],
+    checked_players: str = "",
 ) -> str:
     return render_template(
         config.prompts.get("seer_night_task", ""),
         day=day,
         alive_players=alive_players,
+        checked_players=checked_players,
     )
 
 
@@ -131,6 +133,16 @@ def build_guard_night_task(
     )
 
 
+def _format_seer_history(seer_results: list) -> str:
+    if not seer_results:
+        return ""
+    lines = []
+    for r in seer_results:
+        result_cn = "狼人" if r.result == "werewolf" else "好人"
+        lines.append(f"第{r.day}晚你查验了 {r.target} → {result_cn}")
+    return "\n".join(lines)
+
+
 def build_speech_task(
     config: GameConfig,
     player: str,
@@ -140,7 +152,15 @@ def build_speech_task(
     prior_speeches: dict[str, str],
     observation: str,
     evidence_facts: str,
+    seer_history: str = "",
+    speech_index: int = 1,
 ) -> str:
+    # Format prior speeches as numbered sequential text
+    numbered_lines = []
+    for i, (speaker, content) in enumerate(prior_speeches.items(), 1):
+        numbered_lines.append(f"第{i}位 {speaker}：{content}")
+    prior_speeches_numbered = "\n".join(numbered_lines)
+
     return render_template(
         config.prompts["speech_task"],
         day=day,
@@ -148,9 +168,12 @@ def build_speech_task(
         role=role,
         alive=alive,
         prior_speeches=prior_speeches,
-        prior_speeches_json=json.dumps(prior_speeches, ensure_ascii=False, indent=2) if prior_speeches else "",
+        prior_speeches_numbered=prior_speeches_numbered,
         observation=observation,
         evidence_facts=evidence_facts,
+        seer_history=seer_history,
+        speech_index=speech_index,
+        alive_count=len(alive),
     )
 
 
@@ -165,6 +188,7 @@ def build_first_vote_task(
     own_speech: str,
     observation: str = "",
     recent_death: str = "",
+    seer_history: str = "",
 ) -> str:
     return render_template(
         config.prompts["first_vote_task"],
@@ -177,6 +201,7 @@ def build_first_vote_task(
         own_speech=own_speech,
         observation=observation,
         recent_death=recent_death,
+        seer_history=seer_history,
     )
 
 
@@ -194,6 +219,7 @@ def build_second_vote_task(
     own_speech: str,
     observation: str = "",
     recent_death: str = "",
+    seer_history: str = "",
 ) -> str:
     return render_template(
         config.prompts["second_vote_task"],
@@ -209,6 +235,7 @@ def build_second_vote_task(
         own_speech=own_speech,
         observation=observation,
         recent_death=recent_death,
+        seer_history=seer_history,
     )
 
 

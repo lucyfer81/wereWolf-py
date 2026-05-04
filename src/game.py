@@ -32,6 +32,7 @@ from src.prompts import (
     build_summary_task,
     build_witch_night_task,
     build_wolf_second_round_task,
+    _format_seer_history,
 )
 from src.styles import get_style_for_player, get_style_card
 
@@ -63,6 +64,8 @@ def validate_vote(
 ) -> str | None:
     if target not in alive:
         return "target 不是存活玩家"
+    if target == player:
+        return "target 不能是你自己"
     if not alt_target or alt_target not in alive:
         return "alt_target 不是存活玩家"
     if alt_target == target:
@@ -88,13 +91,25 @@ def build_fallback_speech(player: str, alive: list[str], day: int) -> dict:
 
 def build_fallback_vote(player: str, alive: list[str]) -> dict:
     others = [p for p in alive if p != player]
-    alt = random.choice(others) if others else player
+    if not others:
+        return {
+            "target": player,
+            "confidence": "low",
+            "risk_if_wrong": "无其他存活玩家。",
+            "alt_target": player,
+            "target_vs_alt_reason": "无选择。",
+            "evidence": ["无其他存活玩家。"],
+            "changed_vote": False,
+            "why_change": "",
+        }
+    target = random.choice(others)
+    alt = random.choice([p for p in others if p != target]) if len(others) > 1 else others[0]
     return {
-        "target": player,
+        "target": target,
         "confidence": "low",
         "risk_if_wrong": "证据不足时强行站队可能误杀村民并暴露推理漏洞。",
         "alt_target": alt,
-        "target_vs_alt_reason": "当前证据不足以判断，先保守观望。",
+        "target_vs_alt_reason": "当前证据不足以判断，随机选择。",
         "evidence": ["证据不足，保守处理。", "避免在信息不充分时跟票。"],
         "changed_vote": False,
         "why_change": "",
@@ -245,6 +260,11 @@ class WerewolfGame:
                         round1_votes[wolf] = resp.target
                         targets[resp.target] = targets.get(resp.target, 0) + 1
                         self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target, round=1)
+                        state.game_log.append(PublicEvent(
+                            day=state.current_day, phase="night", type="night_action",
+                            speaker=wolf, content=f"{wolf} 投票击杀 {resp.target}",
+                            details={"role": "werewolf", "target": resp.target, "round": 1},
+                        ))
                     else:
                         self.log.log("fallback", where="werewolf_night_r1", player=wolf, reason="LLM 返回无效目标")
                         non_wolves = [
@@ -267,6 +287,11 @@ class WerewolfGame:
                 if majority_target:
                     night_killed = majority_target
                     self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=night_killed, round=1, result="majority_reached")
+                    state.game_log.append(PublicEvent(
+                        day=state.current_day, phase="night", type="night_action",
+                        speaker="wolves", content=f"狼人达成共识，决定击杀 {night_killed}",
+                        details={"role": "werewolf", "target": night_killed, "round": 1, "result": "majority_reached"},
+                    ))
                 elif targets and total_wolves > 1:
                     # --- Round 2: negotiate with first round results ---
                     first_round_summary = "第一轮投票分布：\n"
@@ -291,26 +316,71 @@ class WerewolfGame:
                         ):
                             round2_targets[resp.target] = round2_targets.get(resp.target, 0) + 1
                             self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target, round=2)
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker=wolf, content=f"{wolf} 第二轮投票击杀 {resp.target}",
+                                details={"role": "werewolf", "target": resp.target, "round": 2},
+                            ))
                         else:
                             self.log.log("fallback", where="werewolf_night_r2", player=wolf, reason="LLM 返回无效目标")
 
                     # Resolve round 2: need majority
+                    round2_majority = None
                     for t, c in round2_targets.items():
                         if c > total_wolves / 2:
-                            night_killed = t
-                            self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=t, round=2, result="majority_reached")
+                            round2_majority = t
                             break
+
+                    if round2_majority:
+                        night_killed = round2_majority
+                        self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=round2_majority, round=2, result="majority_reached")
+                        state.game_log.append(PublicEvent(
+                            day=state.current_day, phase="night", type="night_action",
+                            speaker="wolves", content=f"狼人第二轮达成共识，决定击杀 {round2_majority}",
+                            details={"role": "werewolf", "target": round2_majority, "round": 2, "result": "majority_reached"},
+                        ))
                     else:
-                        # No majority in round 2: no kill tonight
-                        self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target="none", round=2, result="no_consensus")
+                        # Plurality fallback: pick target with most votes (round 2, then round 1)
+                        fallback_target = None
+                        if round2_targets:
+                            max_votes = max(round2_targets.values())
+                            candidates = [t for t, c in round2_targets.items() if c == max_votes]
+                            fallback_target = candidates[0]
+                        elif targets:
+                            max_votes = max(targets.values())
+                            candidates = [t for t, c in targets.items() if c == max_votes]
+                            fallback_target = candidates[0]
+
+                        if fallback_target:
+                            night_killed = fallback_target
+                            self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target=fallback_target, round=2, result="plurality_fallback")
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker="wolves", content=f"狼人未达共识，相对多数决击杀 {fallback_target}",
+                                details={"role": "werewolf", "target": fallback_target, "round": 2, "result": "plurality_fallback"},
+                            ))
+                        else:
+                            self.log.log("night_action", day=state.current_day, player="wolves", role="werewolf", target="none", round=2, result="no_target")
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker="wolves", content="狼人未达成击杀决定",
+                                details={"role": "werewolf", "target": "none", "round": 2, "result": "no_target"},
+                            ))
                 elif targets:
                     # Only 1 wolf, use their target directly
                     night_killed = list(targets.keys())[0]
 
             elif role_key == "seer":
                 for player in players_with_role:
+                    existing = state.memory.player_memories[player].seer_results
+                    checked_lines = []
+                    for r in existing:
+                        result_cn = "狼人" if r.result == "werewolf" else "好人"
+                        checked_lines.append(f"{r.target} → {result_cn}")
+                    checked_players = "\n".join(checked_lines)
                     task = build_seer_night_task(
                         config, state.current_day, state.alive_players,
+                        checked_players=checked_players,
                     )
                     sys_prompt = _get_player_sys_prompt(state, player, config)
                     agent = create_player_agent(sys_prompt)
@@ -327,6 +397,12 @@ class WerewolfGame:
                             )
                         )
                         self.log.log("night_action", day=state.current_day, player=player, role="seer", target=resp.target, result=result)
+                        result_cn = "狼人" if result == "werewolf" else "好人"
+                        state.game_log.append(PublicEvent(
+                            day=state.current_day, phase="night", type="night_action",
+                            speaker=player, content=f"预言家 {player} 验了 {resp.target} → {result_cn}",
+                            details={"role": "seer", "target": resp.target, "result": result},
+                        ))
                     else:
                         self.log.log("fallback", where="seer_night", player=player, reason="LLM 返回无效目标")
 
@@ -344,6 +420,11 @@ class WerewolfGame:
                             guard_protected = resp.target
                             self._last_guarded = resp.target
                             self.log.log("night_action", day=state.current_day, player=player, role="guard", target=resp.target)
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker=player, content=f"守卫 {player} 守护了 {resp.target}",
+                                details={"role": "guard", "target": resp.target},
+                            ))
                         else:
                             self.log.log("fallback", where="guard_night", player=player, reason="连续守护同一人，无效")
                     else:
@@ -370,13 +451,21 @@ class WerewolfGame:
                     agent = create_player_agent(sys_prompt)
                     resp = await self._call_agent(agent, task, player=player, role="witch", model_name="primary")
                     if resp:
-                        if (
+                        # skip: witch chooses not to use any medicine
+                        if resp.target in (player, "skip"):
+                            self.log.log("night_action", day=state.current_day, player=player, role="witch", target=resp.target, action="skip")
+                        elif (
                             resp.target == night_killed
                             and not ws["antidote_used"]
                         ):
                             witch_save = night_killed
                             ws["antidote_used"] = True
                             self.log.log("night_action", day=state.current_day, player=player, role="witch", target=resp.target, action="save")
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker=player, content=f"女巫 {player} 使用解药救了 {resp.target}",
+                                details={"role": "witch", "target": resp.target, "action": "save", "antidote_remaining": False, "poison_remaining": not ws["poison_used"]},
+                            ))
                         elif (
                             resp.target != night_killed
                             and resp.target in state.alive_players
@@ -385,6 +474,11 @@ class WerewolfGame:
                             witch_poison = resp.target
                             ws["poison_used"] = True
                             self.log.log("night_action", day=state.current_day, player=player, role="witch", target=resp.target, action="poison")
+                            state.game_log.append(PublicEvent(
+                                day=state.current_day, phase="night", type="night_action",
+                                speaker=player, content=f"女巫 {player} 使用毒药毒了 {resp.target}",
+                                details={"role": "witch", "target": resp.target, "action": "poison", "antidote_remaining": not ws["antidote_used"], "poison_remaining": False},
+                            ))
                     else:
                         self.log.log("fallback", where="witch_night", player=player, reason="LLM 无响应")
 
@@ -399,7 +493,7 @@ class WerewolfGame:
             state.alive_players.remove(dead)
             for pm in state.memory.player_memories.values():
                 pm.death_log[state.current_day] = dead
-            state.timeline.append(
+            state.add_public_event(
                 PublicEvent(
                     day=state.current_day,
                     phase="night",
@@ -413,7 +507,7 @@ class WerewolfGame:
 
         # Announce peaceful night if no deaths
         if not deaths:
-            state.timeline.append(
+            state.add_public_event(
                 PublicEvent(
                     day=state.current_day,
                     phase="night",
@@ -470,7 +564,7 @@ class WerewolfGame:
             state.alive_players.remove(shot_target)
             for pm in state.memory.player_memories.values():
                 pm.death_log[state.current_day] = shot_target
-            state.timeline.append(
+            state.add_public_event(
                 PublicEvent(
                     day=state.current_day,
                     phase="night",
@@ -509,6 +603,8 @@ class WerewolfGame:
             sys_prompt = _get_player_sys_prompt(state, player, config)
 
             evidence_facts = self._build_evidence_facts()
+            seer_history = self._get_seer_history(player)
+            speech_index = progress.speech_index + 1  # 1-based
             task = build_speech_task(
                 config,
                 player=player,
@@ -518,6 +614,8 @@ class WerewolfGame:
                 prior_speeches=progress.speeches,
                 observation="",
                 evidence_facts=evidence_facts,
+                seer_history=seer_history,
+                speech_index=speech_index,
             )
 
             agent = create_player_agent(sys_prompt)
@@ -545,7 +643,7 @@ class WerewolfGame:
 
             self.log.log("speech", day=state.current_day, player=player, role=state.roles[player], content=content, target=target, is_fallback=is_fallback)
 
-            state.timeline.append(
+            state.add_public_event(
                 PublicEvent(
                     day=state.current_day,
                     phase="day",
@@ -578,7 +676,7 @@ class WerewolfGame:
 
         state.day_progress.day_summary = summary
         self.log.log("summary", day=state.current_day, content=summary)
-        state.timeline.append(
+        state.add_public_event(
             PublicEvent(
                 day=state.current_day,
                 phase="day",
@@ -599,6 +697,7 @@ class WerewolfGame:
             sys_prompt = _get_player_sys_prompt(state, player, config)
             evidence_facts = self._build_evidence_facts()
             own_speech = state.day_progress.speeches.get(player, "（无）")
+            seer_history = self._get_seer_history(player)
             task = build_first_vote_task(
                 config,
                 player=player,
@@ -608,6 +707,7 @@ class WerewolfGame:
                 day_summary=state.day_progress.day_summary,
                 evidence_facts=evidence_facts,
                 own_speech=own_speech,
+                seer_history=seer_history,
             )
 
             agent = create_player_agent(sys_prompt)
@@ -661,6 +761,7 @@ class WerewolfGame:
             evidence_facts = self._build_evidence_facts()
             own_speech = state.day_progress.speeches.get(player, "（无）")
             first_target = state.day_progress.initial_votes.get(player, player)
+            seer_history = self._get_seer_history(player)
             task = build_second_vote_task(
                 config,
                 player=player,
@@ -673,6 +774,7 @@ class WerewolfGame:
                 consensus_targets=state.day_progress.consensus_targets,
                 first_vote_target=first_target,
                 own_speech=own_speech,
+                seer_history=seer_history,
             )
 
             agent = create_player_agent(sys_prompt)
@@ -726,7 +828,7 @@ class WerewolfGame:
                 state.alive_players.remove(eliminated)
                 for pm in state.memory.player_memories.values():
                     pm.death_log[state.current_day] = eliminated
-                state.timeline.append(
+                state.add_public_event(
                     PublicEvent(
                         day=state.current_day,
                         phase="day",
@@ -755,6 +857,12 @@ class WerewolfGame:
                     f"[Day{event.day} {event.phase}] {event.speaker}: {event.content}"
                 )
         return "\n".join(parts)
+
+    def _get_seer_history(self, player: str) -> str:
+        pm = self.state.memory.player_memories.get(player)
+        if not pm:
+            return ""
+        return _format_seer_history(pm.seer_results)
 
     def _build_vote_distribution(self, votes: dict[str, str]) -> str:
         counts: dict[str, list[str]] = {}
