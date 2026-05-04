@@ -220,6 +220,7 @@ def build_second_vote_task(
     observation: str = "",
     recent_death: str = "",
     seer_history: str = "",
+    tie_candidates: list[str] | None = None,
 ) -> str:
     return render_template(
         config.prompts["second_vote_task"],
@@ -236,6 +237,7 @@ def build_second_vote_task(
         observation=observation,
         recent_death=recent_death,
         seer_history=seer_history,
+        tie_candidates=tie_candidates or [],
     )
 
 

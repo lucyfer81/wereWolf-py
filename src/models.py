@@ -148,6 +148,7 @@ class DayProgress:
     final_votes: dict[str, VoteRecord] = field(default_factory=dict)
     vote_distribution: str = ""
     consensus_targets: list[str] = field(default_factory=list)
+    tie_candidates: list[str] = field(default_factory=list)  # 平票候选人（第二轮专用）
     speech_index: int = 0  # 当前发言到第几个玩家
 
 

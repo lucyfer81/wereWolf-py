@@ -97,7 +97,7 @@ def test_fallback_speech_day1():
 
 def test_fallback_vote():
     result = build_fallback_vote("Seat1", ["Seat1", "Seat3", "Seat5"])
-    assert result["target"] == "Seat1"  # fallback votes for self
+    assert result["target"] in ("Seat3", "Seat5")  # fallback votes for random other
     assert result["confidence"] == "low"
 
 

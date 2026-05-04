@@ -62,10 +62,13 @@ def validate_speech(
 def validate_vote(
     player: str, target: str, alt_target: str, alive: list[str], **kwargs
 ) -> str | None:
+    tie_candidates = kwargs.get("tie_candidates")
     if target not in alive:
         return "target 不是存活玩家"
     if target == player:
         return "target 不能是你自己"
+    if tie_candidates and target not in tie_candidates:
+        return "target 必须是平票候选人之一"
     if not alt_target or alt_target not in alive:
         return "alt_target 不是存活玩家"
     if alt_target == target:
@@ -743,18 +746,44 @@ class WerewolfGame:
                 state.current_day, []
             ).append(vr)
 
+        # 统计第一轮票数
+        vote_counts: dict[str, int] = {}
+        for target in state.day_progress.initial_votes.values():
+            vote_counts[target] = vote_counts.get(target, 0) + 1
+
+        # 记录投票分布
         state.day_progress.vote_distribution = self._build_vote_distribution(
             state.day_progress.initial_votes
         )
-        state.day_progress.consensus_targets = self._get_consensus_targets(
-            state.day_progress.initial_votes
-        )
-        state.day_progress.stage = "second_vote"
+        self.log.log("vote_distribution", day=state.current_day, round="first",
+            votes=dict(state.day_progress.initial_votes))
+
+        if not vote_counts:
+            state.day_progress.stage = "resolve"
+            return
+
+        max_votes = max(vote_counts.values())
+        top = [p for p, c in vote_counts.items() if c == max_votes]
+
+        if len(top) == 1:
+            # 唯一最高票：直接淘汰，不进入第二轮
+            eliminated = top[0]
+            self._eliminate_player(eliminated, max_votes)
+            self.log.log("phase_end", day=state.current_day, phase="day", stage="first_vote", eliminated=eliminated, note="直接淘汰，无平票")
+            state.day_progress.stage = "resolve"
+        else:
+            # 平票：平票者进入第二轮
+            state.day_progress.tie_candidates = top
+            state.day_progress.consensus_targets = top
+            self.log.log("vote_tie", day=state.current_day, round="first",
+                tied_players=top, votes=max_votes)
+            state.day_progress.stage = "second_vote"
 
     async def _run_second_vote(self):
         state = self.state
         config = self.config
         alive = state.sort_alive()
+        tie_candidates = state.day_progress.tie_candidates
 
         for player in alive:
             sys_prompt = _get_player_sys_prompt(state, player, config)
@@ -775,11 +804,12 @@ class WerewolfGame:
                 first_vote_target=first_target,
                 own_speech=own_speech,
                 seer_history=seer_history,
+                tie_candidates=tie_candidates,
             )
 
             agent = create_player_agent(sys_prompt)
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
-            if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
+            if resp and not validate_vote(player, resp.target, resp.alt_target, alive, tie_candidates=tie_candidates):
                 changed = resp.changed_vote and len(resp.why_change) >= 5
                 vr = VoteRecord(
                     voter=player,
@@ -795,51 +825,71 @@ class WerewolfGame:
                 self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="second", target=resp.target, alt_target=resp.alt_target, evidence=resp.evidence, changed_vote=changed, why_change=resp.why_change if changed else "", is_fallback=False)
             else:
                 self.log.log("fallback", where="second_vote", player=player, reason="LLM 返回无效投票")
-                fb = build_fallback_vote(player, alive)
+                fb_target = random.choice(tie_candidates) if tie_candidates and player not in tie_candidates else random.choice([p for p in tie_candidates if p != player] or tie_candidates)
+                fb_alt = random.choice([p for p in tie_candidates if p != fb_target] or tie_candidates)
                 vr = VoteRecord(
                     voter=player,
-                    target=fb["target"],
-                    alt_target=fb["alt_target"],
-                    confidence=fb["confidence"],
-                    risk_if_wrong=fb["risk_if_wrong"],
-                    target_vs_alt_reason=fb["target_vs_alt_reason"],
-                    evidence=fb["evidence"],
+                    target=fb_target,
+                    alt_target=fb_alt,
+                    confidence="low",
+                    risk_if_wrong="平票重新投票，证据不足。",
+                    target_vs_alt_reason="平票候选人中随机选择。",
+                    evidence=["第一轮平票，证据不足。"],
+                    changed_vote=False,
+                    why_change="",
                 )
-                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="second", target=fb["target"], alt_target=fb["alt_target"], evidence=fb["evidence"], changed_vote=False, is_fallback=True)
+                self.log.log("vote", day=state.current_day, player=player, role=state.roles[player], round="second", target=fb_target, alt_target=fb_alt, evidence=["平票fallback"], changed_vote=False, is_fallback=True)
 
             state.day_progress.final_votes[player] = vr
             state.memory.player_memories[player].vote_log.setdefault(
                 state.current_day, []
             ).append(vr)
 
+        # 记录第二轮投票分布
+        self.log.log("vote_distribution", day=state.current_day, round="second",
+            votes={v: vr.target for v, vr in state.day_progress.final_votes.items()})
+
         state.day_progress.stage = "resolve"
+
+    def _eliminate_player(self, eliminated: str, votes: int):
+        state = self.state
+        state.alive_players.remove(eliminated)
+        for pm in state.memory.player_memories.values():
+            pm.death_log[state.current_day] = eliminated
+        state.add_public_event(
+            PublicEvent(
+                day=state.current_day,
+                phase="day",
+                type="death",
+                speaker="GameMaster",
+                content=f"{eliminated} 被投票处决（{votes}票）",
+                alive_players=list(state.alive_players),
+            )
+        )
+        self.log.log("death", day=state.current_day, phase="day", player=eliminated, role=state.roles[eliminated], cause="voted", votes=votes)
 
     async def _run_resolve(self):
         state = self.state
-        vote_counts: dict[str, int] = {}
-        for vr in state.day_progress.final_votes.values():
-            vote_counts[vr.target] = vote_counts.get(vr.target, 0) + 1
 
-        if vote_counts:
-            max_votes = max(vote_counts.values())
-            top = [p for p, c in vote_counts.items() if c == max_votes]
-            if len(top) == 1:
-                eliminated = top[0]
-                state.alive_players.remove(eliminated)
-                for pm in state.memory.player_memories.values():
-                    pm.death_log[state.current_day] = eliminated
-                state.add_public_event(
-                    PublicEvent(
-                        day=state.current_day,
-                        phase="day",
-                        type="death",
-                        speaker="GameMaster",
-                        content=f"{eliminated} 被投票处决（{max_votes}票）",
-                        alive_players=list(state.alive_players),
-                    )
-                )
-                self.log.log("death", day=state.current_day, phase="day", player=eliminated, role=state.roles[eliminated], cause="voted", votes=max_votes)
-                self.log.log("phase_end", day=state.current_day, phase="day", stage="resolve", eliminated=eliminated)
+        # 如果有第二轮投票（平票决胜），统计第二轮结果
+        if state.day_progress.final_votes:
+            vote_counts: dict[str, int] = {}
+            for vr in state.day_progress.final_votes.values():
+                vote_counts[vr.target] = vote_counts.get(vr.target, 0) + 1
+
+            if vote_counts:
+                max_votes = max(vote_counts.values())
+                top = [p for p, c in vote_counts.items() if c == max_votes]
+                if len(top) == 1:
+                    eliminated = top[0]
+                    self._eliminate_player(eliminated, max_votes)
+                    self.log.log("phase_end", day=state.current_day, phase="day", stage="resolve", eliminated=eliminated)
+                else:
+                    self.log.log("vote_tie", day=state.current_day, round="second",
+                        tied_players=top, votes=max_votes, note="第二轮仍然平票，无人淘汰")
+                    self.log.log("phase_end", day=state.current_day, phase="day", stage="resolve", eliminated=None, note="平票无人淘汰")
+
+        # 第一轮直接淘汰的淘汰已在 _run_first_vote 中完成
 
         winner = state.check_win()
         if winner != "none":
