@@ -167,20 +167,27 @@ function exportTimelineAsMarkdown() {
 }
 
 function renderEvents() {
-  const events = currentState?.publicEventLog ?? [];
+  const events = currentState?.gameLog ?? [];
   ui.eventsBody.innerHTML = "";
   if (!events.length) {
-    ui.eventsBody.innerHTML = `<tr><td colspan="5">暂无公共事件</td></tr>`;
+    ui.eventsBody.innerHTML = `<tr><td colspan="6">暂无事件</td></tr>`;
     return;
   }
   events.forEach((event) => {
     const tr = document.createElement("tr");
+    if (event.type === "night_action") {
+      tr.className = "night-action";
+    }
+    const detailsStr = event.details
+      ? Object.entries(event.details).map(([k, v]) => `${k}: ${v}`).join(", ")
+      : "";
     tr.innerHTML = `
       <td>${event.day}</td>
       <td>${event.phase}</td>
       <td>${event.type}</td>
       <td>${event.speaker}</td>
       <td>${event.content}</td>
+      <td class="details-cell">${detailsStr}</td>
     `;
     ui.eventsBody.appendChild(tr);
   });

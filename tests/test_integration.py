@@ -242,7 +242,7 @@ async def test_wolf_two_round_voting():
         nonlocal r1_count, r2_count
         prompt_str = str(prompt)
 
-        if "第二轮" in prompt_str:
+        if "最后一轮" in prompt_str:
             r2_count += 1
             # All wolves agree on first non-wolf in round 2
             non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
@@ -301,8 +301,8 @@ async def test_wolf_two_round_voting():
 
 
 @pytest.mark.asyncio
-async def test_peaceful_night_announcement():
-    """When no one dies at night, a peaceful night announcement appears."""
+async def test_wolf_plurality_fallback():
+    """When wolves can't agree in both rounds, plurality fallback picks the most-voted target."""
     config = load_config(FIXTURE_DIR / "default-8p.yaml")
     game = WerewolfGame(config)
     call_idx = 0
@@ -312,7 +312,7 @@ async def test_peaceful_night_announcement():
         call_idx += 1
         prompt_str = str(prompt)
 
-        if "第二轮" in prompt_str:
+        if "最后一轮" in prompt_str:
             # Wolves still disagree in round 2 - each picks different target
             non_wolves = [p for p in game.state.alive_players if game.state.role_teams.get(game.state.roles[p]) != "werewolves"]
             idx = call_idx % len(non_wolves)
@@ -346,7 +346,6 @@ async def test_peaceful_night_announcement():
     ):
         await game.run_one_step()  # night
 
-    # Should have a peaceful night announcement
-    announcements = [e for e in game.state.timeline if e.type == "announcement"]
-    assert len(announcements) == 1
-    assert "平安夜" in announcements[0].content
+    # Plurality fallback should still kill someone
+    death_events = [e for e in game.state.timeline if e.type == "death"]
+    assert len(death_events) == 1

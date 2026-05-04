@@ -52,10 +52,11 @@ class SeerResult:
 class PublicEvent:
     day: int
     phase: Phase
-    type: str  # "death" | "speech" | "vote" | "summary" | "night_action"
+    type: str  # "death" | "speech" | "vote" | "summary" | "night_action" | "announcement"
     speaker: str
     content: str
     alive_players: list[str] = field(default_factory=list)
+    details: dict | None = None
 
 
 @dataclass
@@ -159,10 +160,15 @@ class GameState:
     phase: Phase = "night"
     winner: Winner = "none"
     timeline: list[PublicEvent] = field(default_factory=list)
+    game_log: list[PublicEvent] = field(default_factory=list)
     day_progress: DayProgress = field(default_factory=DayProgress)
     voting_styles: dict[str, VoteStyleKey] = field(default_factory=dict)
     memory: GameMemory = field(default_factory=GameMemory)
     game_id: str = ""
+
+    def add_public_event(self, event: PublicEvent):
+        self.timeline.append(event)
+        self.game_log.append(event)
 
     def check_win(self) -> Winner:
         alive_wolves = sum(

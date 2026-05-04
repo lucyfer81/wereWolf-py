@@ -43,7 +43,7 @@ class TestBasicFlow:
 
     def test_initial_state(self, game_page: Page):
         expect(game_page.locator("#timeline")).to_contain_text("点击")
-        expect(game_page.locator("#events-body")).to_contain_text("暂无公共事件")
+        expect(game_page.locator("#events-body")).to_contain_text("暂无事件")
         expect(game_page.locator("#export-log-btn")).to_be_disabled()
 
     def test_create_new_game(self, game_page: Page):
@@ -66,7 +66,7 @@ class TestBasicFlow:
 
     def test_step_game_once(self, game_page: Page):
         game_page.locator("#step-btn").click()
-        expect(game_page.locator("#events-body")).not_to_contain_text("暂无公共事件", timeout=120_000)
+        expect(game_page.locator("#events-body")).not_to_contain_text("暂无事件", timeout=120_000)
 
         expect(game_page.locator("#timeline")).not_to_contain_text("暂无日志")
 

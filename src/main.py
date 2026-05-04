@@ -113,7 +113,7 @@ def _serialize_state(state) -> dict:
     next_phase = "day" if state.phase == "night" else "night"
 
     timeline_lines: list[str] = []
-    public_events: list[dict] = []
+    game_log_entries: list[dict] = []
 
     for e in state.timeline:
         if e.type == "death":
@@ -126,13 +126,17 @@ def _serialize_state(state) -> dict:
         else:
             timeline_lines.append(f"  {e.speaker}: {e.content}")
 
-        public_events.append({
+    for e in state.game_log:
+        entry = {
             "day": e.day,
             "phase": e.phase,
             "type": e.type,
             "speaker": e.speaker,
             "content": e.content,
-        })
+        }
+        if e.details is not None:
+            entry["details"] = e.details
+        game_log_entries.append(entry)
 
     return {
         "id": state.game_id,
@@ -143,7 +147,7 @@ def _serialize_state(state) -> dict:
         "alivePlayers": list(state.alive_players),
         "roles": state.roles,
         "timeline": timeline_lines,
-        "publicEventLog": public_events,
+        "gameLog": game_log_entries,
         "lastUpdatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
