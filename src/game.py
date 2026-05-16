@@ -640,6 +640,9 @@ class WerewolfGame:
                 result = await asyncio.wait_for(agent.run(reflection_task), timeout=self._llm_timeout)
                 ref = result.output
                 pm.reflections.append(ref.observation)
+                # 提取简短立场摘要
+                stance = ref.observation.strip()[:60]
+                pm.stance_log[state.current_day] = stance
                 # 合并怀疑度
                 for target, score in ref.updated_suspicion.items():
                     if target in state.alive_players and target != player:
