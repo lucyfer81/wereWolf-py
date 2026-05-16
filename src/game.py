@@ -34,7 +34,7 @@ from src.prompts import (
     build_wolf_second_round_task,
     _format_seer_history,
 )
-from src.styles import get_style_for_player, get_style_card
+from src.styles import get_style_for_player, get_style_card, get_speech_hints
 
 
 def sort_seats(seats: list[str]) -> list[str]:
@@ -687,10 +687,14 @@ class WerewolfGame:
                 day=state.current_day,
                 alive=alive,
                 prior_speeches=progress.speeches,
+                prior_speech_targets=progress.speech_targets,
                 observation="",
                 evidence_facts=evidence_facts,
                 seer_history=seer_history,
                 speech_index=speech_index,
+                speech_hints=get_speech_hints(
+                    get_style_for_player(player, config), config
+                ),
             )
 
             # 注入玩家个人记忆
@@ -724,6 +728,7 @@ class WerewolfGame:
                 content, target = fb["content"], fb["target"]
 
             progress.speeches[player] = content
+            progress.speech_targets[player] = target
             state.memory.player_memories[player].speech_log.setdefault(
                 state.current_day, []
             ).append(SpeechRecord(speaker=player, content=content, target=target))
