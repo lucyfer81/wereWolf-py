@@ -1040,9 +1040,10 @@ class WerewolfGame:
         parts: list[str] = []
         for event in self.state.timeline:
             if event.type in ("speech", "vote", "summary", "death"):
-                parts.append(
-                    f"[Day{event.day} {event.phase}] {event.speaker}: {event.content}"
-                )
+                if event.phase == "day" or event.type == "death":
+                    parts.append(
+                        f"[Day{event.day} {event.phase}] {event.speaker}: {event.content}"
+                    )
         result = "\n".join(parts)
         if not result:
             return "（当前为第一天，暂无可核查的公开历史事件。你可以基于自己的身份信息进行初步推理。）"

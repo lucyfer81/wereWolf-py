@@ -118,3 +118,47 @@ def test_game_creates_log_file(config, tmp_path):
     assert records[0]["type"] == "game_start"
     assert records[0]["game_id"] == game.state.game_id
     assert "roles" in records[0]
+
+
+def test_evidence_facts_filters_night_events():
+    """evidence_facts 应该只包含白天阶段的事件（speech, vote, summary）以及死亡事件"""
+    from src.models import GameState, PublicEvent
+    from src.config_loader import load_config
+    from src.game import WerewolfGame
+
+    state = GameState(alive_players=["Seat1", "Seat2", "Seat3"])
+    # Night death (death events should be included regardless of phase)
+    state.add_public_event(PublicEvent(
+        day=1, phase="night", type="death",
+        speaker="GameMaster", content="Seat4 被杀害",
+        alive_players=["Seat1", "Seat2", "Seat3"]
+    ))
+    # Day speech (should be included)
+    state.add_public_event(PublicEvent(
+        day=1, phase="day", type="speech",
+        speaker="Seat1", content="我怀疑Seat2",
+        alive_players=["Seat1", "Seat2", "Seat3"]
+    ))
+    # Day vote (should be included)
+    state.add_public_event(PublicEvent(
+        day=1, phase="day", type="vote",
+        speaker="Seat1", content="Seat1 投票给 Seat2",
+        alive_players=["Seat1", "Seat2", "Seat3"]
+    ))
+    # Night summary (should be EXCLUDED - it's phase=night, type=summary)
+    state.add_public_event(PublicEvent(
+        day=1, phase="night", type="summary",
+        speaker="GameMaster", content="夜间总结",
+        alive_players=["Seat1", "Seat2", "Seat3"]
+    ))
+
+    config = load_config(Path(__file__).parent / "fixtures" / "default-8p.yaml")
+    game = WerewolfGame.__new__(WerewolfGame)
+    game.state = state
+    game.config = config
+
+    facts = game._build_evidence_facts()
+    assert "Seat4 被杀害" in facts
+    assert "我怀疑Seat2" in facts
+    assert "Seat1 投票给 Seat2" in facts
+    assert "夜间总结" not in facts
