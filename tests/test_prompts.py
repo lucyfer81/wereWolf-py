@@ -161,3 +161,18 @@ def test_styles_have_speech_hints():
     for key, card in config.voting_styles.items():
         assert "speech_hints" in card, f"{key} missing speech_hints"
         assert len(card["speech_hints"]) >= 10, f"{key} speech_hints too short"
+
+
+def test_get_speech_hints():
+    from src.styles import get_speech_hints
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    hints = get_speech_hints("pressure", config)
+    assert "主动出击" in hints
+    assert len(hints) >= 10
+
+
+def test_get_speech_hints_default():
+    from src.styles import get_speech_hints
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    hints = get_speech_hints("conservative", config)
+    assert "观望" in hints
