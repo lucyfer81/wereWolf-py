@@ -204,6 +204,16 @@ class WerewolfGame:
             self.log.log("llm_error", player=player, role=role, model="backup", elapsed_ms=elapsed, error_msg=str(e), traceback=_traceback.format_exc())
         return None
 
+    async def _retry_with_feedback(self, agent, task, feedback, player, role) -> PlayerResponse | None:
+        """验证失败时用反馈信息重试一次 LLM 调用。"""
+        retry_task = (
+            f"{task}\n\n"
+            f"【系统反馈】你的上一条回复被拒绝，原因：{feedback}\n"
+            f"请修正错误后重新输出完整的 JSON 回复。"
+        )
+        self.log.log("llm_retry", player=player, role=role, feedback=feedback)
+        return await self._call_agent(agent, retry_task, player=player, role=role, model_name="retry")
+
     async def run_one_step(self) -> GameState:
         if self.state.winner != "none":
             return self.state
@@ -245,6 +255,7 @@ class WerewolfGame:
 
                 # --- Round 1: independent votes ---
                 round1_votes: dict[str, str] = {}  # wolf -> target
+                round1_reasoning: dict[str, str] = {}  # wolf -> reasoning content
                 targets: dict[str, int] = {}
                 for wolf in wolves:
                     teammates = [w for w in wolves if w != wolf]
@@ -261,6 +272,7 @@ class WerewolfGame:
                         and state.role_teams.get(state.roles.get(resp.target)) != "werewolves"
                     ):
                         round1_votes[wolf] = resp.target
+                        round1_reasoning[wolf] = resp.content or ""
                         targets[resp.target] = targets.get(resp.target, 0) + 1
                         self.log.log("night_action", day=state.current_day, player=wolf, role="werewolf", target=resp.target, round=1)
                         state.game_log.append(PublicEvent(
@@ -297,7 +309,15 @@ class WerewolfGame:
                     ))
                 elif targets and total_wolves > 1:
                     # --- Round 2: negotiate with first round results ---
-                    first_round_summary = "第一轮投票分布：\n"
+                    first_round_summary = "第一轮各狼人投票及理由：\n"
+                    for wolf in sort_seats(wolves):
+                        t = round1_votes.get(wolf, "（未投票）")
+                        r = round1_reasoning.get(wolf, "")
+                        first_round_summary += f"  {wolf} → {t}"
+                        if r:
+                            first_round_summary += f"（理由：{r}）"
+                        first_round_summary += "\n"
+                    first_round_summary += "\n第一轮投票分布：\n"
                     for target in sort_seats(targets.keys()):
                         voters = [w for w, t in round1_votes.items() if t == target]
                         first_round_summary += f"  {target} ← {', '.join(sort_seats(voters))} ({len(voters)}票)\n"
@@ -580,6 +600,58 @@ class WerewolfGame:
             self.log.log("death", day=state.current_day, phase="night", player=shot_target, role=state.roles[shot_target], cause="hunter_shot")
             self.log.log("night_action", day=state.current_day, player=hunter, role="hunter", target=shot_target)
 
+    async def _run_reflection(self):
+        """白天结束后，所有存活玩家进行反思，更新怀疑度和观察记录。"""
+        state = self.state
+        config = self.config
+
+        for player in state.alive_players:
+            pm = state.memory.player_memories[player]
+            role = state.roles[player]
+
+            # 构建反思上下文
+            day_context = pm.get_day_context(state.current_day)
+            evidence_facts = self._build_evidence_facts()
+            seer_history = self._get_seer_history(player)
+
+            reflection_task = (
+                f"第{state.current_day}天结束了。请反思今天发生的事。\n\n"
+                f"你是 {player}，身份是 {role}。\n"
+                f"当前存活玩家：{', '.join(state.sort_alive())}\n\n"
+            )
+            if day_context:
+                reflection_task += f"今天的事件记录：\n{day_context}\n\n"
+            if evidence_facts:
+                reflection_task += f"公共事实：\n{evidence_facts}\n\n"
+            if seer_history:
+                reflection_task += f"你的查验记录：\n{seer_history}\n\n"
+            if pm.suspicion:
+                susp_lines = [f"  {p}: {s:.1%}" for p, s in pm.suspicion.items()]
+                reflection_task += f"之前的怀疑度：\n" + "\n".join(susp_lines) + "\n\n"
+            reflection_task += (
+                "请输出 JSON：\n"
+                '{"observation":"你今天观察到的重要信息","updated_suspicion":{"Seat1":0.5,...}}\n'
+                "其中 updated_suspicion 是对各存活玩家（除自己）的怀疑度更新（0.0-1.0）。"
+            )
+
+            from src.llm import create_reflection_agent
+            agent = create_reflection_agent()
+            try:
+                result = await asyncio.wait_for(agent.run(reflection_task), timeout=self._llm_timeout)
+                ref = result.output
+                pm.reflections.append(ref.observation)
+                # 合并怀疑度
+                for target, score in ref.updated_suspicion.items():
+                    if target in state.alive_players and target != player:
+                        pm.suspicion[target] = max(0.0, min(1.0, score))
+                self.log.log(
+                    "reflection", day=state.current_day, player=player, role=role,
+                    observation=ref.observation,
+                    suspicion=dict(pm.suspicion),
+                )
+            except Exception as e:
+                self.log.log("fallback", where="reflection", player=player, reason=str(e))
+
     async def _run_day_phase(self):
         state = self.state
         progress = state.day_progress
@@ -621,9 +693,21 @@ class WerewolfGame:
                 speech_index=speech_index,
             )
 
+            # 注入玩家个人记忆
+            memory_context = state.memory.get_prompt_context(
+                player, state.roles[player], state.role_teams, state.current_day
+            )
+            if memory_context:
+                task = memory_context + "\n\n" + task
+
             agent = create_player_agent(sys_prompt)
             is_fallback = False
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
+            if resp:
+                err = validate_speech(player, resp.content, resp.target, alive, state.current_day)
+                if err:
+                    # 验证失败，用反馈重试一次
+                    resp = await self._retry_with_feedback(agent, task, err, player, state.roles[player])
             if resp:
                 err = validate_speech(player, resp.content, resp.target, alive, state.current_day)
                 if err:
@@ -674,8 +758,16 @@ class WerewolfGame:
             result = await asyncio.wait_for(agent.run(task), timeout=self._llm_timeout)
             summary = result.output.summary
         except Exception:
-            self.log.log("fallback", where="summary", player="GM", reason="GM 摘要生成失败")
-            summary = f"第{state.current_day}天：玩家们进行了讨论。"
+            self.log.log("fallback", where="summary", player="GM", reason="GM 模型生成失败，尝试用主模型重试")
+            try:
+                # 回退用主模型的 GM agent
+                gm_retry_agent = create_gm_agent(sys_prompt, use_primary=True)
+                result = await asyncio.wait_for(gm_retry_agent.run(task), timeout=self._llm_timeout)
+                summary = result.output.summary
+                self.log.log("summary_retry_ok", day=state.current_day, content=summary)
+            except Exception:
+                self.log.log("fallback", where="summary", player="GM", reason="主模型重试也失败")
+                summary = f"第{state.current_day}天：玩家们进行了讨论。"
 
         state.day_progress.day_summary = summary
         self.log.log("summary", day=state.current_day, content=summary)
@@ -713,8 +805,20 @@ class WerewolfGame:
                 seer_history=seer_history,
             )
 
+            # 注入玩家个人记忆
+            memory_context = state.memory.get_prompt_context(
+                player, state.roles[player], state.role_teams, state.current_day
+            )
+            if memory_context:
+                task = memory_context + "\n\n" + task
+
             agent = create_player_agent(sys_prompt)
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
+            if resp:
+                err = validate_vote(player, resp.target, resp.alt_target, alive)
+                if err:
+                    # 验证失败，用反馈重试一次
+                    resp = await self._retry_with_feedback(agent, task, err, player, state.roles[player])
             if resp and not validate_vote(player, resp.target, resp.alt_target, alive):
                 state.day_progress.initial_votes[player] = resp.target
                 vr = VoteRecord(
@@ -807,8 +911,19 @@ class WerewolfGame:
                 tie_candidates=tie_candidates,
             )
 
+            # 注入玩家个人记忆
+            memory_context = state.memory.get_prompt_context(
+                player, state.roles[player], state.role_teams, state.current_day
+            )
+            if memory_context:
+                task = memory_context + "\n\n" + task
+
             agent = create_player_agent(sys_prompt)
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
+            if resp:
+                err = validate_vote(player, resp.target, resp.alt_target, alive, tie_candidates=tie_candidates)
+                if err:
+                    resp = await self._retry_with_feedback(agent, task, err, player, state.roles[player])
             if resp and not validate_vote(player, resp.target, resp.alt_target, alive, tie_candidates=tie_candidates):
                 changed = resp.changed_vote and len(resp.why_change) >= 5
                 vr = VoteRecord(
@@ -895,6 +1010,8 @@ class WerewolfGame:
         if winner != "none":
             state.winner = winner
         else:
+            # 反思阶段：所有存活玩家更新对局面的判断
+            await self._run_reflection()
             state.current_day += 1
             state.phase = "night"
             state.day_progress = DayProgress()
@@ -906,7 +1023,10 @@ class WerewolfGame:
                 parts.append(
                     f"[Day{event.day} {event.phase}] {event.speaker}: {event.content}"
                 )
-        return "\n".join(parts)
+        result = "\n".join(parts)
+        if not result:
+            return "（当前为第一天，暂无可核查的公开历史事件。你可以基于自己的身份信息进行初步推理。）"
+        return result
 
     def _get_seer_history(self, player: str) -> str:
         pm = self.state.memory.player_memories.get(player)

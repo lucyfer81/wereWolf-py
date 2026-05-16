@@ -78,8 +78,8 @@ def create_player_agent(system_prompt: str = "", use_bak: bool = False) -> Agent
     )
 
 
-def create_gm_agent(system_prompt: str = "") -> Agent:
-    model = _get_gm_model()
+def create_gm_agent(system_prompt: str = "", use_primary: bool = False) -> Agent:
+    model = _get_model() if use_primary else _get_gm_model()
     return Agent(
         model=model,
         output_type=GMSummary,

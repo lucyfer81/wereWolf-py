@@ -33,3 +33,4 @@ docs/
 # Claude
 .claude/
 logs/
+scripts/
