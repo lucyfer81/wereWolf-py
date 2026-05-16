@@ -70,6 +70,7 @@ class PlayerMemory:
     suspicion: dict[str, float] = field(default_factory=dict)  # player -> 怀疑分
     seer_results: list[SeerResult] = field(default_factory=list)
     role_state: dict | None = None  # per-role state like WitchState
+    stance_log: dict[int, str] = field(default_factory=dict)  # day -> 立场摘要
 
     def get_day_context(self, up_to_day: int) -> str:
         parts: list[str] = []
@@ -143,6 +144,7 @@ class GameMemory:
 class DayProgress:
     stage: DayStage = "speeches"
     speeches: dict[str, str] = field(default_factory=dict)  # player -> content
+    speech_targets: dict[str, str] = field(default_factory=dict)  # player -> target
     day_summary: str = ""
     initial_votes: dict[str, str] = field(default_factory=dict)  # player -> target
     final_votes: dict[str, VoteRecord] = field(default_factory=dict)

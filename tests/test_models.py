@@ -171,3 +171,21 @@ def test_player_memory_role_state():
     mem.role_state = {"antidote_used": False, "poison_used": False}
     assert mem.role_state is not None
     assert mem.role_state["antidote_used"] is False
+
+
+def test_day_progress_speech_targets():
+    from src.models import DayProgress
+    dp = DayProgress()
+    dp.speech_targets["Seat1"] = "Seat5"
+    dp.speech_targets["Seat3"] = "Seat7"
+    assert dp.speech_targets["Seat1"] == "Seat5"
+    assert dp.speech_targets["Seat3"] == "Seat7"
+
+
+def test_player_memory_stance_log():
+    from src.models import PlayerMemory
+    pm = PlayerMemory()
+    pm.stance_log[1] = "怀疑Seat5，认为Seat2预言家身份可疑"
+    pm.stance_log[2] = "坚持怀疑Seat5，新增怀疑Seat7"
+    assert "Seat5" in pm.stance_log[1]
+    assert len(pm.stance_log) == 2
