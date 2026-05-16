@@ -702,7 +702,12 @@ class WerewolfGame:
                 player, state.roles[player], state.role_teams, state.current_day
             )
             if memory_context:
-                task = memory_context + "\n\n" + task
+                task = (
+                    "## 你的历史记忆（请保持发言与历史立场一致，不要自相矛盾）\n"
+                    f"{memory_context}\n\n"
+                    "## 当前任务\n"
+                    f"{task}"
+                )
 
             agent = create_player_agent(sys_prompt)
             is_fallback = False
@@ -815,7 +820,12 @@ class WerewolfGame:
                 player, state.roles[player], state.role_teams, state.current_day
             )
             if memory_context:
-                task = memory_context + "\n\n" + task
+                task = (
+                    "## 你的历史记忆（请保持发言与历史立场一致，不要自相矛盾）\n"
+                    f"{memory_context}\n\n"
+                    "## 当前任务\n"
+                    f"{task}"
+                )
 
             agent = create_player_agent(sys_prompt)
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
@@ -921,7 +931,12 @@ class WerewolfGame:
                 player, state.roles[player], state.role_teams, state.current_day
             )
             if memory_context:
-                task = memory_context + "\n\n" + task
+                task = (
+                    "## 你的历史记忆（请保持发言与历史立场一致，不要自相矛盾）\n"
+                    f"{memory_context}\n\n"
+                    "## 当前任务\n"
+                    f"{task}"
+                )
 
             agent = create_player_agent(sys_prompt)
             resp = await self._call_agent(agent, task, player=player, role=state.roles[player], model_name="primary")
