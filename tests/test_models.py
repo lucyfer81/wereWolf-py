@@ -79,9 +79,13 @@ def test_player_memory_day_context():
     ]
     mem.death_log[1] = "Seat3"
     ctx = mem.get_day_context(1)
-    assert "Seat1" in ctx
-    assert "Seat3" in ctx
-    assert "死亡" in ctx
+    assert "### Day1 我的发言" in ctx
+    assert "我怀疑Seat3" in ctx
+    assert "指向 Seat3" in ctx
+    assert "### Day1 我的投票" in ctx
+    assert "投票给 Seat3" in ctx
+    assert "### Day1 存活变化" in ctx
+    assert "Seat3 死亡" in ctx
 
 
 def test_player_memory_reflections():
@@ -189,3 +193,34 @@ def test_player_memory_stance_log():
     pm.stance_log[2] = "坚持怀疑Seat5，新增怀疑Seat7"
     assert "Seat5" in pm.stance_log[1]
     assert len(pm.stance_log) == 2
+
+
+def test_get_day_context_structured_format():
+    from src.models import PlayerMemory, SpeechRecord, VoteRecord
+    pm = PlayerMemory()
+    pm.speech_log[1] = [SpeechRecord(speaker="Seat1", content="我觉得Seat5有问题", target="Seat5")]
+    pm.vote_log[1] = [VoteRecord(
+        voter="Seat1", target="Seat5", alt_target="Seat3",
+        confidence="high", risk_if_wrong="可能冤枉好人",
+        target_vs_alt_reason="Seat5更可疑"
+    )]
+    pm.death_log[1] = "Seat3"
+    pm.stance_log[1] = "怀疑Seat5"
+
+    ctx = pm.get_day_context(1)
+    assert "### Day1 我的发言" in ctx
+    assert "我觉得Seat5有问题" in ctx
+    assert "指向 Seat5" in ctx
+    assert "### Day1 我的投票" in ctx
+    assert "Seat5" in ctx
+    assert "### Day1 存活变化" in ctx
+    assert "Seat3" in ctx
+    assert "### Day1 我的立场" in ctx
+    assert "怀疑Seat5" in ctx
+
+
+def test_get_day_context_no_stance():
+    from src.models import PlayerMemory
+    pm = PlayerMemory()
+    ctx = pm.get_day_context(1)
+    assert ctx == ""

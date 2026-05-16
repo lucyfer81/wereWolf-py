@@ -77,23 +77,28 @@ class PlayerMemory:
         for day in sorted(self.speech_log.keys()):
             if day > up_to_day:
                 break
-            parts.append(f"=== 第{day}天发言 ===")
+            parts.append(f"### Day{day} 我的发言")
             for s in self.speech_log[day]:
-                parts.append(f"  {s.speaker}: {s.content} (怀疑{s.target})")
+                parts.append(f"> {s.content}（指向 {s.target}）")
         for day in sorted(self.vote_log.keys()):
             if day > up_to_day:
                 break
-            parts.append(f"=== 第{day}天投票 ===")
+            parts.append(f"### Day{day} 我的投票")
             for v in self.vote_log[day]:
-                parts.append(
-                    f"  {v.voter} -> {v.target}"
-                    + (f" (改票，原因：{v.why_change})" if v.changed_vote else "")
-                )
+                line = f"> 投票给 {v.target}"
+                if v.changed_vote:
+                    line += f"（改票，原因：{v.why_change}）"
+                parts.append(line)
         for day in sorted(self.death_log.keys()):
             if day > up_to_day:
                 break
-            parts.append(f"=== 第{day}天死亡 ===")
-            parts.append(f"  {self.death_log[day]} 被淘汰")
+            parts.append(f"### Day{day} 存活变化")
+            parts.append(f"> {self.death_log[day]} 死亡")
+        for day in sorted(self.stance_log.keys()):
+            if day > up_to_day:
+                break
+            parts.append(f"### Day{day} 我的立场")
+            parts.append(f"> {self.stance_log[day]}")
         return "\n".join(parts)
 
     def get_reflections_str(self) -> str:
