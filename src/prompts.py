@@ -150,15 +150,22 @@ def build_speech_task(
     day: int,
     alive: list[str],
     prior_speeches: dict[str, str],
-    observation: str,
-    evidence_facts: str,
+    prior_speech_targets: dict[str, str] | None = None,
+    observation: str = "",
+    evidence_facts: str = "",
     seer_history: str = "",
     speech_index: int = 1,
+    speech_hints: str = "",
 ) -> str:
-    # Format prior speeches as numbered sequential text
+    # Format prior speeches with target info
     numbered_lines = []
+    targets = prior_speech_targets or {}
     for i, (speaker, content) in enumerate(prior_speeches.items(), 1):
-        numbered_lines.append(f"第{i}位 {speaker}：{content}")
+        target = targets.get(speaker, "")
+        if target:
+            numbered_lines.append(f"第{i}位 {speaker}（指向 {target}）：{content}")
+        else:
+            numbered_lines.append(f"第{i}位 {speaker}：{content}")
     prior_speeches_numbered = "\n".join(numbered_lines)
 
     return render_template(
@@ -174,6 +181,7 @@ def build_speech_task(
         seer_history=seer_history,
         speech_index=speech_index,
         alive_count=len(alive),
+        speech_hints=speech_hints,
     )
 
 

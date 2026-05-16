@@ -176,3 +176,31 @@ def test_get_speech_hints_default():
     config = load_config(FIXTURE_DIR / "default-8p.yaml")
     hints = get_speech_hints("conservative", config)
     assert "观望" in hints
+
+
+def test_speech_task_with_targets():
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    task = build_speech_task(
+        config,
+        player="Seat3", role="villager", day=2,
+        alive=["Seat1", "Seat3", "Seat5", "Seat7"],
+        prior_speeches={"Seat1": "我怀疑Seat5"},
+        prior_speech_targets={"Seat1": "Seat5"},
+        observation="关注Seat5",
+        evidence_facts="some facts",
+        speech_hints="发言时注重逻辑链条和证据引用。",
+    )
+    assert "指向 Seat5" in task
+    assert "逻辑链条" in task
+
+
+def test_speech_task_day1_no_targets():
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    task = build_speech_task(
+        config,
+        player="Seat1", role="villager", day=1,
+        alive=["Seat1", "Seat2", "Seat3", "Seat4", "Seat5", "Seat6", "Seat7", "Seat8"],
+        prior_speeches={}, prior_speech_targets={},
+        observation="", evidence_facts="test facts",
+    )
+    assert "第 1 天白天" in task

@@ -239,6 +239,10 @@ prompts:
     前序发言：
     {{ prior_speeches_numbered }}
     {% endif %}
+    {% if speech_hints %}
+
+    你的发言风格：{{ speech_hints }}
+    {% endif %}
     {% if observation %}
 
     你观察的重点是：{{ observation }}
