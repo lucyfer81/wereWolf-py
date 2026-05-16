@@ -154,3 +154,10 @@ def test_summary_task(config):
     assert "第 1 天" in task
     assert "Seat1" in task
     assert "summary" in task
+
+
+def test_styles_have_speech_hints():
+    config = load_config(FIXTURE_DIR / "default-8p.yaml")
+    for key, card in config.voting_styles.items():
+        assert "speech_hints" in card, f"{key} missing speech_hints"
+        assert len(card["speech_hints"]) >= 10, f"{key} speech_hints too short"
