@@ -16,8 +16,7 @@ const ui = {
 };
 
 function updateExportLogButtonState() {
-  const hasTimeline = Boolean(currentState?.timeline?.length);
-  ui.exportLogBtn.disabled = busy || !hasTimeline;
+  ui.exportLogBtn.disabled = busy || !currentState;
 }
 
 function setBusy(nextBusy) {
@@ -126,7 +125,7 @@ function buildTimelineMarkdown() {
   const alivePlayers = currentState?.alivePlayers?.length ? currentState.alivePlayers.join(", ") : "-";
   const exportedAt = new Date().toISOString();
 
-  return [
+  const sections = [
     "# AI 狼人杀运行日志",
     "",
     `- 导出时间: ${exportedAt}`,
@@ -137,20 +136,52 @@ function buildTimelineMarkdown() {
     `- Winner: ${currentState?.winner ?? "-"}`,
     `- Alive Players: ${alivePlayers}`,
     "",
-    "## 时间线日志",
-    "",
-    "```text",
-    timelineText || "暂无日志。",
-    "```",
-    "",
-  ].join("\n");
+  ];
+
+  // 身份配置
+  const roles = currentState?.roles;
+  if (roles && Object.keys(roles).length) {
+    sections.push("## 身份配置", "");
+    const sortedRoles = Object.entries(roles)
+      .sort((a, b) => Number(a[0].replace("Seat", "")) - Number(b[0].replace("Seat", "")));
+    sections.push("| 座位 | 身份 |");
+    sections.push("| --- | --- |");
+    sortedRoles.forEach(([seat, role]) => {
+      sections.push(`| ${seat} | ${role} |`);
+    });
+    sections.push("");
+  }
+
+  // 详细事件（上帝视角）
+  const gameLog = currentState?.gameLog;
+  if (gameLog && gameLog.length) {
+    sections.push("## 详细事件（上帝视角）", "");
+    sections.push("| Day | Phase | Type | Speaker | Content | Details |");
+    sections.push("| --- | --- | --- | --- | --- | --- |");
+    gameLog.forEach((event) => {
+      const detailsStr = event.details
+        ? Object.entries(event.details).map(([k, v]) => `${k}: ${v}`).join(", ")
+        : "";
+      const content = String(event.content ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+      const details = detailsStr.replace(/\|/g, "\\|").replace(/\n/g, " ");
+      sections.push(`| ${event.day} | ${event.phase} | ${event.type} | ${event.speaker ?? "-"} | ${content} | ${details} |`);
+    });
+    sections.push("");
+  }
+
+  // 时间线日志
+  sections.push("## 时间线日志", "");
+  sections.push("```text");
+  sections.push(timelineText || "暂无日志。");
+  sections.push("```");
+  sections.push("");
+
+  return sections.join("\n");
 }
 
 function exportTimelineAsMarkdown() {
-  const timeline = currentState?.timeline ?? [];
-  if (!timeline.length) {
-    alert("当前没有可导出的时间线日志。");
-    updateExportLogButtonState();
+  if (!currentState) {
+    alert("当前没有可导出的数据。");
     return;
   }
 
